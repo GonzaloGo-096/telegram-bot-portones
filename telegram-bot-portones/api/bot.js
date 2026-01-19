@@ -30,18 +30,17 @@ bot.on('callback_query', (ctx) => {
   }
 })
 
-// Exportamos handler para Vercel
 module.exports = async (req, res) => {
   try {
     if (req.method === 'POST') {
-      await bot.handleUpdate(req.body, res)
+      await bot.handleUpdate(req.body)
       res.status(200).send('OK')
     } else {
-      res.status(200).send('Bot de portones activo.')
+      res.status(200).send('Bot de portones funcionando.')
     }
   } catch (error) {
     console.error(error)
-    res.status(500).send('Error en bot')
+    res.status(200).send('OK')
   }
 }
 
