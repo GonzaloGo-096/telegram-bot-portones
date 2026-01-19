@@ -1,46 +1,36 @@
-const { Telegraf } = require('telegraf')
-require('dotenv').config()
+import { Telegraf, Markup } from "telegraf";
 
-const bot = new Telegraf(process.env.BOT_TOKEN)
+if (!process.env.BOT_TOKEN) {
+  throw new Error("BOT_TOKEN no está definido en las variables de entorno");
+}
 
-// Función de inicio: muestra menú de botones
+const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// Comando /start con botones
 bot.start((ctx) => {
-  ctx.reply('Seleccioná un portón:', {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: 'Portón 1', callback_data: 'abrir_porton_1' }],
-        [{ text: 'Portón 2', callback_data: 'abrir_porton_2' }],
-      ],
-    },
-  })
-})
+  return ctx.reply("Bot de portones activo.", Markup.inlineKeyboard([
+    Markup.button.callback("Portón 1", "PORTON_1"),
+    Markup.button.callback("Portón 2", "PORTON_2")
+  ]));
+});
 
-// Manejo de selección de botones
-bot.on('callback_query', (ctx) => {
-  const data = ctx.callbackQuery.data
+// Manejo de callbacks de los botones
+bot.action("PORTON_1", (ctx) => ctx.reply("Se presionó Portón 1."));
+bot.action("PORTON_2", (ctx) => ctx.reply("Se presionó Portón 2."));
 
-  if (data === 'abrir_porton_1') {
-    ctx.answerCbQuery('Intención registrada: Portón 1')
-    ctx.reply('Has seleccionado Portón 1')
-  } else if (data === 'abrir_porton_2') {
-    ctx.answerCbQuery('Intención registrada: Portón 2')
-    ctx.reply('Has seleccionado Portón 2')
-  } else {
-    ctx.answerCbQuery('Opción no reconocida')
-  }
-})
-
-module.exports = async (req, res) => {
+// Función serverless para Vercel
+export default async function handler(req, res) {
   try {
-    if (req.method === 'POST') {
-      await bot.handleUpdate(req.body)
-      res.status(200).send('OK')
+    if (req.method === "POST") {
+      // Manejar actualización de Telegram
+      await bot.handleUpdate(req.body, res);
+      return res.status(200).send("ok");
     } else {
-      res.status(200).send('Bot de portones funcionando.')
+      return res.status(200).send("Bot de portones funcionando.");
     }
   } catch (error) {
-    console.error(error)
-    res.status(200).send('OK')
+    console.error("Error en el bot:", error);
+    return res.status(200).send("ok");
   }
 }
 
