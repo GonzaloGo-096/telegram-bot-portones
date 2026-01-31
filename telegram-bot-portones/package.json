@@ -1,25 +1,24 @@
 {
   "name": "telegram-bot-portones",
   "version": "1.0.0",
-  "description": "Bot de Telegram para control de portones - Desarrollo local y producción serverless",
+  "description": "Bot de Telegram para control de portones (Railway, webhook)",
   "type": "module",
-  "main": "src/bot.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/bot.js",
-    "dev": "node src/bot.js",
+    "start": "node index.js",
+    "dev": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
     "telegram",
     "bot",
     "portones",
-    "vercel",
-    "serverless"
+    "railway"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "dotenv": "^17.2.3",
+    "express": "^4.21.0",
     "telegraf": "^4.16.3"
   },
   "engines": {
