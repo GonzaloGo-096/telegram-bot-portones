@@ -4,6 +4,7 @@ import { Telegraf, Markup } from "telegraf";
 const PORT = Number(process.env.PORT) || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const PUBLIC_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.PUBLIC_DOMAIN;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || null;
 const WEBHOOK_PATH = "/bot";
 const WEBHOOK_URL = PUBLIC_DOMAIN ? `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}` : null;
 
@@ -132,6 +133,19 @@ app.post(WEBHOOK_PATH, (req, res) => {
   });
 
   logReq(req, res);
+
+  if (WEBHOOK_SECRET) {
+    const received = req.get("x-telegram-bot-api-secret-token");
+    if (received !== WEBHOOK_SECRET) {
+      log("POST /bot rechazado: secret token ausente o no coincide", {
+        requestId: req.requestId,
+        hasHeader: !!received,
+      });
+      res.status(401).end();
+      return;
+    }
+  }
+
   res.status(200).end();
 
   if (!bot) {
@@ -163,8 +177,9 @@ app.listen(PORT, "0.0.0.0", async () => {
     return;
   }
   try {
-    log("Intentando setWebhook", { url: WEBHOOK_URL });
-    await bot.telegram.setWebhook(WEBHOOK_URL);
+    log("Intentando setWebhook", { url: WEBHOOK_URL, hasSecret: !!WEBHOOK_SECRET });
+    const setWebhookOpts = WEBHOOK_SECRET ? { secret_token: WEBHOOK_SECRET } : {};
+    await bot.telegram.setWebhook(WEBHOOK_URL, setWebhookOpts);
     state.webhookConfigured = true;
     state.webhookError = null;
     const info = await bot.telegram.getWebhookInfo();
