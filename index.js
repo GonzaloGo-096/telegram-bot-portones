@@ -7,6 +7,13 @@ const PUBLIC_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.PUBLIC_DO
 const WEBHOOK_PATH = "/bot";
 const WEBHOOK_URL = PUBLIC_DOMAIN ? `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}` : null;
 
+const state = {
+  serverStartedAt: null,
+  webhookUrl: null,
+  webhookConfigured: false,
+  webhookError: null,
+};
+
 const log = (message, data = null) => {
   const ts = new Date().toISOString();
   if (data != null) console.log(`[${ts}] ${message}`, data);
@@ -74,11 +81,44 @@ function logReq(req, res) {
 
 app.get("/health", (req, res) => {
   logReq(req, res);
+  const uptimeSec = state.serverStartedAt
+    ? (Date.now() - state.serverStartedAt.getTime()) / 1000
+    : 0;
   res.status(200).json({
     ok: true,
     now: new Date().toISOString(),
+    uptimeSec,
     hasBot: !!bot,
-    webhookUrl: WEBHOOK_URL,
+    webhookUrl: state.webhookUrl,
+    webhookConfigured: state.webhookConfigured,
+  });
+});
+
+app.get("/ready", (req, res) => {
+  logReq(req, res);
+  const ready = !!bot && state.webhookConfigured;
+  if (ready) {
+    res.status(200).json({
+      ok: true,
+      now: new Date().toISOString(),
+      hasBot: true,
+      webhookConfigured: true,
+      webhookUrl: state.webhookUrl,
+    });
+    return;
+  }
+  const reason = !bot
+    ? "BOT_TOKEN no definido"
+    : !state.webhookConfigured
+      ? "Webhook no configurado"
+      : "Unknown";
+  res.status(503).json({
+    ok: false,
+    reason,
+    hasBot: !!bot,
+    webhookConfigured: state.webhookConfigured,
+    webhookError: state.webhookError,
+    webhookUrl: state.webhookUrl,
   });
 });
 
@@ -108,6 +148,9 @@ app.post(WEBHOOK_PATH, (req, res) => {
 });
 
 app.listen(PORT, "0.0.0.0", async () => {
+  state.serverStartedAt = new Date();
+  state.webhookUrl = WEBHOOK_URL;
+
   log("Arranque del servidor", {
     PORT,
     dominio: PUBLIC_DOMAIN ?? null,
@@ -122,12 +165,15 @@ app.listen(PORT, "0.0.0.0", async () => {
   try {
     log("Intentando setWebhook", { url: WEBHOOK_URL });
     await bot.telegram.setWebhook(WEBHOOK_URL);
+    state.webhookConfigured = true;
+    state.webhookError = null;
     const info = await bot.telegram.getWebhookInfo();
     log("Webhook configurado correctamente", { url: info.url, pending: info.pending_update_count });
   } catch (err) {
+    state.webhookConfigured = false;
+    state.webhookError = err.message || String(err);
     log("Error al configurar webhook:", {
-      error: err.message,
-      stack: err.stack,
+      error: state.webhookError,
       url: WEBHOOK_URL,
     });
   }
