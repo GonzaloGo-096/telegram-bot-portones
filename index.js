@@ -13,6 +13,10 @@ const log = (message, data = null) => {
   else console.log(`[${ts}] ${message}`);
 };
 
+function genRequestId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 // ——— Bot: una sola instancia al arranque ———
 let bot = null;
 if (BOT_TOKEN) {
@@ -45,7 +49,31 @@ if (BOT_TOKEN) {
 const app = express();
 app.use(express.json());
 
+app.use((req, res, next) => {
+  req.requestId = genRequestId();
+  res.setHeader("X-Request-Id", req.requestId);
+  req.startTime = Date.now();
+  next();
+});
+
+function logReq(req, res) {
+  res.on("finish", () => {
+    const ms = Date.now() - req.startTime;
+    const ua = req.get("user-agent") || "";
+    log("REQ", {
+      id: req.requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      ms,
+      ip: req.ip || req.socket?.remoteAddress,
+      uaShort: ua.slice(0, 60),
+    });
+  });
+}
+
 app.get("/health", (req, res) => {
+  logReq(req, res);
   res.status(200).json({
     ok: true,
     now: new Date().toISOString(),
@@ -57,8 +85,13 @@ app.get("/health", (req, res) => {
 app.post(WEBHOOK_PATH, (req, res) => {
   const hasBody = !!req.body && Object.keys(req.body || {}).length > 0;
   const updateId = req.body?.update_id;
-  log("POST /bot recibido", { hasBody, update_id: updateId ?? null });
+  log("POST /bot recibido", {
+    requestId: req.requestId,
+    update_id: updateId ?? null,
+    hasBody,
+  });
 
+  logReq(req, res);
   res.status(200).end();
 
   if (!bot) {
