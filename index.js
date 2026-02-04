@@ -4,7 +4,7 @@ import { Telegraf, Markup } from "telegraf";
 const PORT = Number(process.env.PORT) || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const PUBLIC_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.PUBLIC_DOMAIN;
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || null;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET?.trim() || "";
 const WEBHOOK_PATH = "/bot";
 const WEBHOOK_URL = PUBLIC_DOMAIN ? `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}` : null;
 
@@ -137,10 +137,7 @@ app.post(WEBHOOK_PATH, (req, res) => {
   if (WEBHOOK_SECRET) {
     const received = req.get("x-telegram-bot-api-secret-token");
     if (received !== WEBHOOK_SECRET) {
-      log("POST /bot rechazado: secret token ausente o no coincide", {
-        requestId: req.requestId,
-        hasHeader: !!received,
-      });
+      log("Webhook rechazado por secret", { requestId: req.requestId });
       res.status(401).end();
       return;
     }
