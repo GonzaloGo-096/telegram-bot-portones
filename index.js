@@ -21,6 +21,41 @@ const log = (message, data = null) => {
   else console.log(`[${ts}] ${message}`);
 };
 
+process.on("unhandledRejection", (reason) => {
+  const msg = reason?.message ?? String(reason);
+  const stack = reason?.stack;
+  log("unhandledRejection", stack ? { message: msg, stack } : { message: msg });
+});
+
+process.on("uncaughtException", (err) => {
+  log("uncaughtException", { message: err?.message, stack: err?.stack });
+  shutdown("uncaughtException", 1);
+});
+
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+let shuttingDown = false;
+let server = null;
+
+function shutdown(signal, exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log("Shutdown iniciado", { signal });
+  const done = () => process.exit(exitCode);
+  if (!server) {
+    done();
+    return;
+  }
+  const timeoutId = setTimeout(done, SHUTDOWN_TIMEOUT_MS);
+  server.close((err) => {
+    clearTimeout(timeoutId);
+    if (err) log("server.close error", { error: err.message });
+    done();
+  });
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
 function genRequestId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -158,7 +193,7 @@ app.post(WEBHOOK_PATH, (req, res) => {
   });
 });
 
-app.listen(PORT, "0.0.0.0", async () => {
+server = app.listen(PORT, "0.0.0.0", async () => {
   state.serverStartedAt = new Date();
   state.webhookUrl = WEBHOOK_URL;
 
