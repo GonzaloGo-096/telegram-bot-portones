@@ -45,24 +45,41 @@ if (BOT_TOKEN) {
 const app = express();
 app.use(express.json());
 
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    ok: true,
+    now: new Date().toISOString(),
+    hasBot: !!bot,
+    webhookUrl: WEBHOOK_URL,
+  });
+});
+
 app.post(WEBHOOK_PATH, (req, res) => {
+  const hasBody = !!req.body && Object.keys(req.body || {}).length > 0;
+  const updateId = req.body?.update_id;
+  log("POST /bot recibido", { hasBody, update_id: updateId ?? null });
+
   res.status(200).end();
+
   if (!bot) {
-    log("POST /bot recibido pero bot no inicializado (falta BOT_TOKEN).");
+    log("POST /bot: bot no inicializado (falta BOT_TOKEN).");
     return;
   }
   if (!req.body) {
     log("POST /bot sin body, ignorado.");
     return;
   }
-  log("Update recibido de Telegram", { update_id: req.body.update_id });
   bot.handleUpdate(req.body).catch((err) => {
     log("Error al procesar update:", { error: err.message });
   });
 });
 
-app.listen(PORT, async () => {
-  log(`Servidor escuchando en puerto ${PORT}`);
+app.listen(PORT, "0.0.0.0", async () => {
+  log("Arranque del servidor", {
+    PORT,
+    dominio: PUBLIC_DOMAIN ?? null,
+    WEBHOOK_URL,
+  });
 
   if (!bot) return;
   if (!WEBHOOK_URL) {
@@ -70,10 +87,15 @@ app.listen(PORT, async () => {
     return;
   }
   try {
+    log("Intentando setWebhook", { url: WEBHOOK_URL });
     await bot.telegram.setWebhook(WEBHOOK_URL);
     const info = await bot.telegram.getWebhookInfo();
     log("Webhook configurado correctamente", { url: info.url, pending: info.pending_update_count });
   } catch (err) {
-    log("Error al configurar webhook:", { error: err.message });
+    log("Error al configurar webhook:", {
+      error: err.message,
+      stack: err.stack,
+      url: WEBHOOK_URL,
+    });
   }
 });
