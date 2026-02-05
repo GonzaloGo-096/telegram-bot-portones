@@ -15,10 +15,12 @@ const state = {
   webhookError: null,
 };
 
-const log = (message, data = null) => {
+const log = (message, data) => {
   const ts = new Date().toISOString();
-  if (data != null) console.log(`[${ts}] ${message}`, data);
-  else console.log(`[${ts}] ${message}`);
+  const line = (data === undefined || data === null)
+    ? `[${ts}] ${message}`
+    : `[${ts}] ${message} ${JSON.stringify(data)}`;
+  console.log(line);
 };
 
 process.on("unhandledRejection", (reason) => {
@@ -103,14 +105,15 @@ function logReq(req, res) {
   res.on("finish", () => {
     const ms = Date.now() - req.startTime;
     const ua = req.get("user-agent") || "";
+    const ip = req.get("x-forwarded-for")?.split(",")[0]?.trim() || req.ip;
     log("REQ", {
       id: req.requestId,
       method: req.method,
       path: req.path,
       status: res.statusCode,
       ms,
-      ip: req.ip || req.socket?.remoteAddress,
-      uaShort: ua.slice(0, 60),
+      ip,
+      uaShort: ua ? ua.slice(0, 60) : "-",
     });
   });
 }
