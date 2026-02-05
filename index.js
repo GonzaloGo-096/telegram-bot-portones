@@ -1,12 +1,24 @@
 import express from "express";
-import { Telegraf, Markup } from "telegraf";
+import { createBot, parseAllowedChatIds } from "./bot.js";
+import { registerFeedbackRoute } from "./feedback.js";
 
+// ——— Variables de entorno (ver .env.example para documentación) ———
+// PORT → servidor HTTP
 const PORT = Number(process.env.PORT) || 3000;
+// BOT_TOKEN → Telegraf (obligatorio)
 const BOT_TOKEN = process.env.BOT_TOKEN;
+// RAILWAY_PUBLIC_DOMAIN | PUBLIC_DOMAIN → URL del webhook
 const PUBLIC_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.PUBLIC_DOMAIN;
+// WEBHOOK_SECRET → validación header x-telegram-bot-api-secret-token en POST /bot
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET?.trim() || "";
 const WEBHOOK_PATH = "/bot";
 const WEBHOOK_URL = PUBLIC_DOMAIN ? `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}` : null;
+
+// CONTROLADOR_BASE_URL, CONTROLADOR_API_KEY → cliente HTTP enviarEvento()
+const CONTROLADOR_BASE_URL = process.env.CONTROLADOR_BASE_URL?.trim() || "";
+const CONTROLADOR_API_KEY = process.env.CONTROLADOR_API_KEY?.trim() || "";
+// ALLOWED_CHAT_IDS → filtro de chats en /start, botones y feedback
+const ALLOWED_CHAT_IDS = parseAllowedChatIds(process.env.ALLOWED_CHAT_IDS || "");
 
 const state = {
   serverStartedAt: null,
@@ -62,33 +74,14 @@ function genRequestId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// ——— Bot: una sola instancia al arranque ———
-let bot = null;
-if (BOT_TOKEN) {
-  bot = new Telegraf(BOT_TOKEN);
-  bot.catch((err, ctx) => {
-    log("Error en el bot:", { error: err.message, update: ctx.update });
-  });
-  bot.start((ctx) => {
-    log("Comando /start recibido", { user: ctx.from?.username ?? ctx.from?.id, chat: ctx.chat?.id });
-    return ctx.reply("Bot de portones activo.", Markup.inlineKeyboard([
-      Markup.button.callback("Portón 1", "PORTON_1"),
-      Markup.button.callback("Portón 2", "PORTON_2"),
-    ]));
-  });
-  bot.action("PORTON_1", async (ctx) => {
-    log("Botón presionado: Portón 1", { user: ctx.from?.username ?? ctx.from?.id });
-    await ctx.answerCbQuery("Portón 1 seleccionado");
-    return ctx.reply("Se presionó Portón 1.");
-  });
-  bot.action("PORTON_2", async (ctx) => {
-    log("Botón presionado: Portón 2", { user: ctx.from?.username ?? ctx.from?.id });
-    await ctx.answerCbQuery("Portón 2 seleccionado");
-    return ctx.reply("Se presionó Portón 2.");
-  });
-} else {
-  log("BOT_TOKEN no definido. Bot desactivado. Definir BOT_TOKEN en variables de entorno.");
-}
+// ——— Bot ———
+const bot = createBot({
+  botToken: BOT_TOKEN,
+  controladorBaseUrl: CONTROLADOR_BASE_URL,
+  controladorApiKey: CONTROLADOR_API_KEY,
+  allowedChatIds: ALLOWED_CHAT_IDS,
+  log,
+});
 
 // ——— Servidor HTTP ———
 const app = express();
@@ -196,6 +189,9 @@ app.post(WEBHOOK_PATH, (req, res) => {
   });
 });
 
+// Endpoint de feedback del Controlador Central
+registerFeedbackRoute(app, bot, ALLOWED_CHAT_IDS, log, logReq);
+
 server = app.listen(PORT, "0.0.0.0", async () => {
   state.serverStartedAt = new Date();
   state.webhookUrl = WEBHOOK_URL;
@@ -204,6 +200,8 @@ server = app.listen(PORT, "0.0.0.0", async () => {
     PORT,
     dominio: PUBLIC_DOMAIN ?? null,
     WEBHOOK_URL,
+    controladorConfigurado: !!CONTROLADOR_BASE_URL,
+    allowedChatIdsCount: ALLOWED_CHAT_IDS.length,
   });
 
   if (!bot) return;
