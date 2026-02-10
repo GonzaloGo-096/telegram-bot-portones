@@ -1,207 +1,94 @@
-# 🤖 Telegram Bot Portones
+# Bot de Telegram - Control de Portones
 
-Bot de Telegram para control de portones con soporte para desarrollo local (polling) y producción serverless en Vercel (webhook).
+Bot de Telegram para control de portones con **PostgreSQL**, **roles dinámicos** y flujo **tenant → portón → acción**. Permisos desde `user_tenants` y `user_gates` (sin hardcode de chat_ids).
 
-## 📁 Estructura del Proyecto
+## Estructura del proyecto
 
 ```
 telegram-bot-portones/
-├── api/
-│   └── bot.js          # Función serverless para Vercel
 ├── src/
-│   └── bot.js          # Bot local con polling (desarrollo)
+│   ├── index.js                 # Entry point: Express, webhook, arranque
+│   ├── bot/
+│   │   ├── bot.js                # Configuración Telegraf
+│   │   ├── commands/
+│   │   │   ├── start.js          # Handler /start → selección tenant
+│   │   │   ├── openGate.js       # Lógica de abrir portón
+│   │   │   └── feedback.js       # Endpoint POST /api/feedback
+│   │   └── callbacks/
+│   │       ├── tenantSelection.js
+│   │       └── gateSelection.js
+│   ├── db/
+│   │   ├── index.js              # Pool PostgreSQL
+│   │   └── queries.js            # Queries parametrizadas
+│   └── utils/
+│       ├── controladorClient.js  # Cliente HTTP al Controlador
+│       ├── jwt.js
+│       └── permissions.js
+├── .env.example
 ├── package.json
-├── vercel.json
-├── .env                 # Variables de entorno (local)
 └── README.md
 ```
 
-## 🚀 Configuración Inicial
+## Flujo del bot
 
-### 1. Instalar Dependencias
+1. **`/start`** → El usuario ve sus edificios (tenants) según `user_tenants`.
+2. **Selecciona tenant** → Ve los portones (gates) según `user_gates`.
+3. **Selecciona portón** → Se envía evento al Controlador y se registra en `gate_events`.
 
-```bash
-npm install
-```
+## Requisitos de base de datos
 
-### 2. Configurar Variables de Entorno
+Tablas esperadas: `users`, `user_tenants`, `tenants`, `gates`, `user_gates`, `gate_events`.
 
-Crear archivo `.env` en la raíz del proyecto:
+Esquema mínimo:
 
-```env
-BOT_TOKEN=tu_token_de_telegram
-WEBHOOK_URL=https://telegram-bot-portones.vercel.app/api/bot
-```
+- **users**: `id`, `telegram_user_id` (string), `username`, `created_at`
+- **user_tenants**: `user_id`, `tenant_id`, `role`
+- **tenants**: `id`, `name`
+- **gates**: `id`, `tenant_id`, `name`, `controller_id` (ej. "porton1", "porton2")
+- **user_gates**: `user_id`, `gate_id`
+- **gate_events**: `id`, `gate_id`, `user_id`, `event_type`, `created_at`
 
-## 💻 Desarrollo Local
+## Configuración
 
-### Ejecutar con Polling
-
-```bash
-npm start
-```
-
-El bot se ejecutará localmente usando polling para recibir actualizaciones de Telegram.
-
-**Características:**
-- ✅ Logs con timestamp y prefijo `[LOCAL]`
-- ✅ Polling automático
-- ✅ Mismos comandos y botones que producción
-- ✅ Manejo de errores y cierre limpio
-
-## 🌐 Producción en Vercel
-
-### 1. Configurar Variables de Entorno en Vercel
-
-1. Ir a tu proyecto en Vercel
-2. **Settings** → **Environment Variables**
-3. Agregar:
-   - `BOT_TOKEN` = `tu_token_de_telegram`
-   - `WEBHOOK_URL` = `https://telegram-bot-portones.vercel.app/api/bot` (opcional, solo referencia)
-
-### 2. Desplegar
-
-```bash
-vercel --prod
-```
-
-O conectar tu repositorio de GitHub a Vercel para despliegues automáticos.
-
-### 3. Configurar Webhook en Telegram
-
-#### Opción A: Usando el endpoint automático (Recomendado)
-
-Una vez desplegado, visitar:
-
-```
-https://telegram-bot-portones.vercel.app/api/bot?set-webhook=true
-```
-
-Esto configurará el webhook automáticamente.
-
-#### Opción B: Usando cURL
-
-```bash
-curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://telegram-bot-portones.vercel.app/api/bot"}'
-```
-
-#### Opción C: Verificar webhook configurado
-
-```bash
-curl "https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo"
-```
-
-O visitar:
-
-```
-https://telegram-bot-portones.vercel.app/api/bot?get-webhook=true
-```
-
-## 📊 Logs y Depuración
-
-### Desarrollo Local
-
-Los logs aparecen en la consola con formato:
-```
-[2024-01-15T10:30:45.123Z] [LOCAL] Comando /start recibido
-```
-
-### Producción en Vercel
-
-1. **Dashboard de Vercel:**
-   - Ir a tu proyecto
-   - Click en **Functions** → `api/bot.js`
-   - Ver logs en tiempo real
-
-2. **CLI de Vercel:**
+1. Copiar `.env.example` a `.env`:
    ```bash
-   vercel logs --follow
+   cp .env.example .env
    ```
 
-Los logs incluyen:
-- ✅ Timestamp ISO
-- ✅ Tipo de acción (POST, /start, botones, errores)
-- ✅ Datos relevantes (usuario, chat, etc.)
-- ✅ Prefijo `[LOCAL]` o `(serverless)` para identificar el entorno
+2. Configurar variables en `.env`:
+   - `BOT_TOKEN` - Token de @BotFather
+   - `DATABASE_URL` - Conexión PostgreSQL
+   - `CONTROLADOR_BASE_URL` - URL del Controlador
+   - `RAILWAY_PUBLIC_DOMAIN` o `PUBLIC_DOMAIN` - Para webhook
 
-## 🎯 Funcionalidades
-
-### Comandos
-
-- `/start` - Muestra menú con botones de portones
-
-### Botones
-
-- **Portón 1** - Selecciona Portón 1
-- **Portón 2** - Selecciona Portón 2
-
-## 🔧 Características Técnicas
-
-### Serverless (`api/bot.js`)
-
-- ✅ ES6 modules (`import`/`export`)
-- ✅ Manejo correcto de `bot.handleUpdate(req.body)` sin pasar `res`
-- ✅ Respuesta `200 OK` inmediata a Telegram
-- ✅ Logs con timestamp de todas las acciones
-- ✅ Endpoints para configurar/verificar webhook
-- ✅ Manejo robusto de errores
-
-### Local (`src/bot.js`)
-
-- ✅ ES6 modules compatible
-- ✅ Polling para desarrollo
-- ✅ Logs diferenciados con `[LOCAL]`
-- ✅ Mismos `callback_data` que producción
-- ✅ Cierre limpio con Ctrl+C
-
-## ⚠️ Solución de Problemas
-
-### El bot no responde en Telegram
-
-1. **Verificar webhook configurado:**
-   ```
-   https://telegram-bot-portones.vercel.app/api/bot?get-webhook=true
+3. Instalar dependencias:
+   ```bash
+   npm install
    ```
 
-2. **Verificar logs en Vercel:**
-   - Revisar si llegan POST desde Telegram
-   - Buscar errores en los logs
+4. Ejecutar:
+   ```bash
+   npm start
+   ```
 
-3. **Verificar BOT_TOKEN en Vercel:**
-   - Settings → Environment Variables
-   - Confirmar que `BOT_TOKEN` está configurado
+## Despliegue (Railway)
 
-### Error "BOT_TOKEN no está definido"
+1. Conectar el repositorio a Railway.
+2. Configurar variables de entorno en el dashboard.
+3. Railway inyecta `RAILWAY_PUBLIC_DOMAIN` automáticamente.
+4. Health check: `GET /health` y `GET /ready`.
 
-- **Local:** Verificar que `.env` existe y tiene `BOT_TOKEN`
-- **Vercel:** Configurar `BOT_TOKEN` en Environment Variables
+## Endpoints
 
-### El bot funciona local pero no en Vercel
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | /health | Estado del servidor |
+| GET | /ready | Listo para recibir tráfico (webhook configurado) |
+| POST | /bot | Webhook de Telegram |
+| POST | /api/feedback | Recepción de feedback del Controlador |
 
-1. Verificar que `api/bot.js` está en la carpeta `api/`
-2. Verificar que el deploy fue exitoso
-3. Revisar logs de Vercel para errores
-4. Verificar que el webhook está configurado correctamente
+## Migración desde estructura antigua
 
-## 📝 Notas
-
-- El dominio fijo `https://telegram-bot-portones.vercel.app` se mantiene constante en todos los deploys
-- Los `callback_data` están unificados entre local y producción (`PORTON_1`, `PORTON_2`)
-- El archivo `.env` está en `.gitignore` y no se sube al repositorio
-- Vercel detecta automáticamente la carpeta `api/` como funciones serverless
-
-## 🔐 Seguridad
-
-- ⚠️ **NUNCA** subir `.env` al repositorio
-- ⚠️ **NUNCA** exponer `BOT_TOKEN` en logs públicos
-- ✅ Usar variables de entorno en Vercel para producción
-- ✅ `.env` solo para desarrollo local
-
-## 📚 Recursos
-
-- [Documentación de Telegraf](https://telegraf.js.org/)
-- [Documentación de Vercel](https://vercel.com/docs)
-- [API de Telegram Bot](https://core.telegram.org/bots/api)
-
+- **Eliminar** archivos en raíz: `index.js`, `bot.js`, `controladorClient.js`, `feedback.js`.
+- **Conservar** `.env` (actualizar con `DATABASE_URL`).
+- El nuevo entry point es `src/index.js`; el script `npm start` apunta a él.

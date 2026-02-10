@@ -1,24 +1,22 @@
-import express from "express";
-import { createBot, parseAllowedChatIds } from "./bot.js";
-import { registerFeedbackRoute } from "./feedback.js";
+/**
+ * Entry point del Bot de Telegram - Control de Portones.
+ * Bot solo UI: sin DB, sin lógica de negocio. Comunicación con el backend vía HTTP.
+ */
 
-// ——— Variables de entorno (ver .env.example para documentación) ———
-// PORT → servidor HTTP
+import "dotenv/config";
+import express from "express";
+import { createBackendClient } from "./api/backendClient.js";
+import { createBot } from "./bot/bot.js";
+import { registerNotifyRoute } from "./routes/notify.js";
+
 const PORT = Number(process.env.PORT) || 3000;
-// BOT_TOKEN → Telegraf (obligatorio)
 const BOT_TOKEN = process.env.BOT_TOKEN;
-// RAILWAY_PUBLIC_DOMAIN | PUBLIC_DOMAIN → URL del webhook
 const PUBLIC_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.PUBLIC_DOMAIN;
-// WEBHOOK_SECRET → validación header x-telegram-bot-api-secret-token en POST /bot
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET?.trim() || "";
 const WEBHOOK_PATH = "/bot";
 const WEBHOOK_URL = PUBLIC_DOMAIN ? `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}` : null;
-
-// CONTROLADOR_BASE_URL, CONTROLADOR_API_KEY → cliente HTTP enviarEvento()
-const CONTROLADOR_BASE_URL = process.env.CONTROLADOR_BASE_URL?.trim() || "";
-const CONTROLADOR_API_KEY = process.env.CONTROLADOR_API_KEY?.trim() || "";
-// ALLOWED_CHAT_IDS → filtro de chats en /start, botones y feedback
-const ALLOWED_CHAT_IDS = parseAllowedChatIds(process.env.ALLOWED_CHAT_IDS || "");
+const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL?.trim() || "";
+const BACKEND_API_KEY = process.env.BACKEND_API_KEY?.trim() || "";
 
 const state = {
   serverStartedAt: null,
@@ -29,11 +27,16 @@ const state = {
 
 const log = (message, data) => {
   const ts = new Date().toISOString();
-  const line = (data === undefined || data === null)
-    ? `[${ts}] ${message}`
-    : `[${ts}] ${message} ${JSON.stringify(data)}`;
+  const line =
+    data === undefined || data === null
+      ? `[${ts}] ${message}`
+      : `[${ts}] ${message} ${JSON.stringify(data)}`;
   console.log(line);
 };
+
+if (!BACKEND_BASE_URL) {
+  log("BACKEND_BASE_URL no está definido. Definilo en .env para que el bot se comunique con el backend.");
+}
 
 process.on("unhandledRejection", (reason) => {
   const msg = reason?.message ?? String(reason);
@@ -54,7 +57,9 @@ function shutdown(signal, exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   log("Shutdown iniciado", { signal });
-  const done = () => process.exit(exitCode);
+  const done = () => {
+    process.exit(exitCode);
+  };
   if (!server) {
     done();
     return;
@@ -74,16 +79,17 @@ function genRequestId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// ——— Bot ———
-const bot = createBot({
-  botToken: BOT_TOKEN,
-  controladorBaseUrl: CONTROLADOR_BASE_URL,
-  controladorApiKey: CONTROLADOR_API_KEY,
-  allowedChatIds: ALLOWED_CHAT_IDS,
+const backendClient = createBackendClient(BACKEND_BASE_URL, {
+  apiKey: BACKEND_API_KEY,
   log,
 });
 
-// ——— Servidor HTTP ———
+const bot = createBot({
+  botToken: BOT_TOKEN,
+  backendClient,
+  log,
+});
+
 const app = express();
 app.use(express.json());
 
@@ -189,8 +195,7 @@ app.post(WEBHOOK_PATH, (req, res) => {
   });
 });
 
-// Endpoint de feedback del Controlador Central
-registerFeedbackRoute(app, bot, ALLOWED_CHAT_IDS, log, logReq);
+registerNotifyRoute(app, bot, log, logReq);
 
 server = app.listen(PORT, "0.0.0.0", async () => {
   state.serverStartedAt = new Date();
@@ -200,8 +205,7 @@ server = app.listen(PORT, "0.0.0.0", async () => {
     PORT,
     dominio: PUBLIC_DOMAIN ?? null,
     WEBHOOK_URL,
-    controladorConfigurado: !!CONTROLADOR_BASE_URL,
-    allowedChatIdsCount: ALLOWED_CHAT_IDS.length,
+    backendConfigurado: !!BACKEND_BASE_URL,
   });
 
   if (!bot) return;
@@ -216,7 +220,10 @@ server = app.listen(PORT, "0.0.0.0", async () => {
     state.webhookConfigured = true;
     state.webhookError = null;
     const info = await bot.telegram.getWebhookInfo();
-    log("Webhook configurado correctamente", { url: info.url, pending: info.pending_update_count });
+    log("Webhook configurado correctamente", {
+      url: info.url,
+      pending: info.pending_update_count,
+    });
   } catch (err) {
     state.webhookConfigured = false;
     state.webhookError = err.message || String(err);

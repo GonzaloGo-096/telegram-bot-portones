@@ -1,23 +1,25 @@
 {
   "name": "telegram-bot-portones",
-  "version": "1.0.0",
-  "description": "Bot de Telegram para control de portones (Railway, webhook)",
+  "version": "2.0.0",
+  "description": "Bot de Telegram solo UI: control de portones via backend HTTP",
   "type": "module",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node index.js",
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
     "telegram",
     "bot",
     "portones",
-    "railway"
+    "railway",
+    "backend"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "dotenv": "^17.2.4",
     "express": "^4.21.0",
     "telegraf": "^4.16.3"
   },
