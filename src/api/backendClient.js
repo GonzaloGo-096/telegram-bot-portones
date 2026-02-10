@@ -189,10 +189,13 @@ export function createBackendClient(baseUrl, options = {}) {
       const path = `${BACKEND_PATH_TENANTS}?telegram_id=${query}`;
       const res = await request("GET", path);
       if (!res.ok) {
+        const raw = (res.error || res.data?.error || "").trim();
+        const generic = /error\s+desconocido|unknown\s+error/i.test(raw) || !raw;
+        const error = generic ? "No pudimos cargar los edificios. Intentá de nuevo más tarde." : raw;
         return {
           ok: false,
           tenants: [],
-          error: res.error || res.data?.error || "Error al cargar edificios.",
+          error,
         };
       }
       const tenants = res.data?.tenants ?? [];
