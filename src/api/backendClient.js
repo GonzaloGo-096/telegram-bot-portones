@@ -24,14 +24,16 @@ const BACKEND_PATH_TENANTS = "/api/telegram/tenants";
 const BACKEND_PATH_COMMAND = "/api/telegram/command";
 
 /**
- * Normaliza la base URL: quita espacios y barras finales.
+ * Normaliza la base URL y exige que sea absoluta (http/https).
+ * En Node.js fetch() solo acepta URLs absolutas; una relativa como /api/... causa "Failed to parse URL".
  * @param {string} baseUrl
- * @returns {string} URL sin barra final, o "" si no válida
+ * @returns {string} URL sin barra final, o "" si no válida o no absoluta
  */
 function normalizeBaseUrl(baseUrl) {
   if (baseUrl == null || typeof baseUrl !== "string") return "";
   const trimmed = baseUrl.trim();
   if (trimmed === "") return "";
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return "";
   return trimmed.replace(/\/+$/, "");
 }
 
@@ -44,13 +46,14 @@ function genRequestId() {
 }
 
 /**
- * Construye la URL absoluta. Si baseUrl está vacía, devuelve null (no llamar a fetch).
- * @param {string} baseUrl - Base ya normalizada
- * @param {string} path - Path que empieza con /
- * @returns {string|null}
+ * Construye la URL absoluta. Solo devuelve valor si base es http(s) y path válido (evita "Failed to parse URL").
+ * @param {string} baseUrl - Base ya normalizada (debe ser http:// o https://)
+ * @param {string} path - Path (ej. /api/telegram/tenants?telegram_id=...)
+ * @returns {string|null} URL absoluta o null para no llamar a fetch
  */
 function buildFullUrl(baseUrl, path) {
   if (!baseUrl || typeof path !== "string") return null;
+  if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) return null;
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${baseUrl}${p}`;
 }
@@ -70,7 +73,9 @@ export function createBackendClient(baseUrl, options = {}) {
   const disabled = base === "";
 
   if (disabled) {
-    log("BackendClient: BACKEND_BASE_URL no está definida o es inválida. No se realizarán llamadas al backend.");
+    log(
+      "BackendClient: BACKEND_BASE_URL no está definida o no es una URL absoluta (http:// o https://). No se realizarán llamadas al backend."
+    );
   }
 
   /**

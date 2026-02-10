@@ -15,8 +15,13 @@ const PUBLIC_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.PUBLIC_DO
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET?.trim() || "";
 const WEBHOOK_PATH = "/bot";
 const WEBHOOK_URL = PUBLIC_DOMAIN ? `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}` : null;
-const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL?.trim() || "";
-const BACKEND_API_KEY = process.env.BACKEND_API_KEY?.trim() || "";
+// BACKEND_BASE_URL es la opción principal; si no existe, se usa CONTROLADOR_BASE_URL (compatibilidad)
+const BACKEND_BASE_URL =
+  process.env.BACKEND_BASE_URL?.trim() ||
+  process.env.CONTROLADOR_BASE_URL?.trim() ||
+  "";
+const BACKEND_API_KEY =
+  process.env.BACKEND_API_KEY?.trim() || process.env.CONTROLADOR_API_KEY?.trim() || "";
 
 const state = {
   serverStartedAt: null,
@@ -35,7 +40,9 @@ const log = (message, data) => {
 };
 
 if (!BACKEND_BASE_URL) {
-  log("BACKEND_BASE_URL no está definido. Definilo en .env para que el bot se comunique con el backend.");
+  log(
+    "BACKEND_BASE_URL (o CONTROLADOR_BASE_URL) no está definido. Definilo en .env para que el bot se comunique con el backend."
+  );
 }
 
 process.on("unhandledRejection", (reason) => {
