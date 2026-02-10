@@ -42,10 +42,17 @@ export function createBot({ botToken, backendClient, log }) {
     registerStartCommand(bot, opts);
     registerTenantSelectionCallback(bot, opts);
     registerGateSelectionCallback(bot, opts);
+    log?.("Bot: handlers de /start y callbacks registrados (backend configurado).");
   } else {
     log?.(
-      "backendClient inválido o sin getTenants/executeCommand. Handlers de /start y callbacks no registrados."
+      "Bot: backendClient inválido o BACKEND_BASE_URL no configurada. Handlers de /start y callbacks NO registrados."
     );
+    // Respuesta cuando el usuario escribe /start pero el backend no está configurado
+    bot.start(async (ctx) => {
+      await ctx.reply(
+        "El servicio de edificios no está configurado. Revisá que BACKEND_BASE_URL o CONTROLADOR_BASE_URL esté definido en .env y reiniciá el bot."
+      );
+    });
   }
 
   return bot;

@@ -91,6 +91,12 @@ const backendClient = createBackendClient(BACKEND_BASE_URL, {
   log,
 });
 
+if (BACKEND_BASE_URL) {
+  log("Backend URL configurada", { base: BACKEND_BASE_URL.slice(0, 30) + "..." });
+} else {
+  log("Backend URL vacía: no se registrarán handlers de /start hasta definir BACKEND_BASE_URL o CONTROLADOR_BASE_URL en .env");
+}
+
 const bot = createBot({
   botToken: BOT_TOKEN,
   backendClient,

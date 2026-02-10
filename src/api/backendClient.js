@@ -156,11 +156,20 @@ export function createBackendClient(baseUrl, options = {}) {
       }
     }
 
+    const status = lastError?.status ?? 0;
+    const data = lastError?.data ?? null;
+    let errorMsg = lastError?.message;
+    if (!errorMsg) {
+      if (typeof data?.error === "string" && data.error.trim()) errorMsg = data.error;
+      else if (status >= 500) errorMsg = "El servidor no pudo responder. Intentá más tarde.";
+      else if (status) errorMsg = `Error del servidor (${status}). Intentá más tarde.`;
+      else errorMsg = "No se pudo conectar con el servidor. Intentá más tarde.";
+    }
     return {
       ok: false,
-      status: 0,
-      data: null,
-      error: lastError?.message || "Error desconocido",
+      status: status || 0,
+      data,
+      error: errorMsg,
     };
   }
 
