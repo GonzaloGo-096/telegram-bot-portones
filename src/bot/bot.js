@@ -12,7 +12,8 @@ function isValidBackendClient(client) {
   return (
     client != null &&
     typeof client.getTenants === "function" &&
-    typeof client.executeCommand === "function"
+    typeof client.executeCommand === "function" &&
+    client.isConfigured !== false
   );
 }
 

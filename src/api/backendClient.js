@@ -1,50 +1,100 @@
 /**
- * Cliente HTTP al backend profesional. Todas las llamadas al backend pasan por aquí.
- * Timeout 10s, 2 reintentos, X-Request-Id, X-API-Key opcional. Content-Type solo si hay body.
- * Sin lógica de negocio.
+ * Cliente HTTP al backend. Único punto de comunicación bot → backend.
+ *
+ * Requisitos:
+ * - BACKEND_BASE_URL obligatoria; si falta, no se hace fetch (evita "Failed to parse URL").
+ * - GET /api/telegram/tenants, POST /api/telegram/command.
+ * - Headers: X-Request-Id, X-API-Key opcional, Content-Type solo con body.
+ * - Timeout 10s, 2 reintentos para 5xx/red; 4xx (salvo 429) sin reintento.
+ * - Respuestas normalizadas para consumo por handlers.
  *
  * Contrato del backend:
- *
- * GET /api/telegram/tenants?telegram_id={id}
- * - 200: { tenants: [ { tenantId, tenantName, gates: [ { gateId, gateName } ] } ] }
- * - 400: { error } (telegram_id faltante o inválido)
- * - 500: error de servidor
- *
- * POST /api/telegram/command
- * Body: { telegramId, gateId, action }
- * - 200: { accepted: true } | { accepted: false, reason: "FORBIDDEN" | "INVALID_ACTION" }
- * - 403: { accepted: false, reason: "FORBIDDEN" }
- * - 400: { accepted: false, reason: "INVALID_ACTION" }
- * - 500: error de servidor
+ * - GET /api/telegram/tenants?telegram_id={id}
+ *   → 200: { tenants: [ { tenantId, tenantName, gates: [ { gateId, gateName } ] } ] }
+ *   → 400/500: { error } o body de error
+ * - POST /api/telegram/command
+ *   → Body: { telegramId, gateId, action }
+ *   → 200: { accepted: true } | { accepted: false, reason: "FORBIDDEN" | "INVALID_ACTION" }
+ *   → 403/400/500 según razón
  */
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RETRIES = 2;
+const BACKEND_PATH_TENANTS = "/api/telegram/tenants";
+const BACKEND_PATH_COMMAND = "/api/telegram/command";
 
+/**
+ * Normaliza la base URL: quita espacios y barras finales.
+ * @param {string} baseUrl
+ * @returns {string} URL sin barra final, o "" si no válida
+ */
 function normalizeBaseUrl(baseUrl) {
-  if (!baseUrl || typeof baseUrl !== "string") return "";
-  return baseUrl.trim().replace(/\/+$/, "");
+  if (baseUrl == null || typeof baseUrl !== "string") return "";
+  const trimmed = baseUrl.trim();
+  if (trimmed === "") return "";
+  return trimmed.replace(/\/+$/, "");
 }
 
+/**
+ * Genera un ID único por petición (para X-Request-Id).
+ * @returns {string}
+ */
 function genRequestId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /**
- * @param {string} baseUrl - BACKEND_BASE_URL
- * @param {object} [options] - { apiKey?, log? }
- * @returns {{ getTenants: Function, executeCommand: Function }}
+ * Construye la URL absoluta. Si baseUrl está vacía, devuelve null (no llamar a fetch).
+ * @param {string} baseUrl - Base ya normalizada
+ * @param {string} path - Path que empieza con /
+ * @returns {string|null}
+ */
+function buildFullUrl(baseUrl, path) {
+  if (!baseUrl || typeof path !== "string") return null;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${baseUrl}${p}`;
+}
+
+/**
+ * Crea el cliente HTTP al backend.
+ *
+ * @param {string} baseUrl - process.env.BACKEND_BASE_URL (obligatoria en producción)
+ * @param {object} [options]
+ * @param {string} [options.apiKey] - process.env.BACKEND_API_KEY (opcional)
+ * @param {function} [options.log] - Logger inyectable para tests y producción
+ * @returns {{ getTenants: (telegramId: string|number) => Promise<{ok: boolean, tenants?: array, error?: string}>, executeCommand: (telegramId, gateId, action) => Promise<{accepted: boolean, reason?: string, error?: string}> }}
  */
 export function createBackendClient(baseUrl, options = {}) {
   const { apiKey = "", log = () => {} } = options;
-  const url = normalizeBaseUrl(baseUrl);
+  const base = normalizeBaseUrl(baseUrl);
+  const disabled = base === "";
 
+  if (disabled) {
+    log("BackendClient: BACKEND_BASE_URL no está definida o es inválida. No se realizarán llamadas al backend.");
+  }
+
+  /**
+   * Realiza una petición HTTP. Si el cliente está deshabilitado (sin base URL), no llama a fetch.
+   * @param {string} method - GET | POST
+   * @param {string} path - Path absoluto (ej. /api/telegram/tenants)
+   * @param {object|null} body - Body para POST; null para GET
+   * @returns {Promise<{ ok: boolean, status?: number, data?: object, error?: string }>}
+   */
   async function request(method, path, body = null) {
+    const fullUrl = buildFullUrl(base, path);
+    if (!fullUrl) {
+      return {
+        ok: false,
+        status: 0,
+        data: null,
+        error: "Backend no configurado (BACKEND_BASE_URL faltante o inválida).",
+      };
+    }
+
     const requestId = genRequestId();
-    const fullUrl = `${url}${path}`;
     const headers = {
       "X-Request-Id": requestId,
-      ...(body !== null ? { "Content-Type": "application/json" } : {}),
+      ...(body !== null && body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(apiKey ? { "X-API-Key": apiKey } : {}),
     };
 
@@ -57,7 +107,7 @@ export function createBackendClient(baseUrl, options = {}) {
         const res = await fetch(fullUrl, {
           method,
           headers,
-          body: body ? JSON.stringify(body) : undefined,
+          body: body != null ? JSON.stringify(body) : undefined,
           signal: controller.signal,
         });
 
@@ -78,8 +128,14 @@ export function createBackendClient(baseUrl, options = {}) {
         lastError = { status: res.status, data, text: text?.slice(0, 200) };
         log("BackendClient: respuesta no OK", { requestId, method, path, ...lastError });
 
+        // 4xx (excepto 429) no se reintenta
         if (res.status >= 400 && res.status < 500 && res.status !== 429) {
-          return { ok: false, status: res.status, data, error: data?.error || text?.slice(0, 100) };
+          return {
+            ok: false,
+            status: res.status,
+            data,
+            error: data?.error || text?.slice(0, 100) || `HTTP ${res.status}`,
+          };
         }
       } catch (err) {
         lastError = err.name === "AbortError" ? new Error("Timeout") : err;
@@ -104,40 +160,45 @@ export function createBackendClient(baseUrl, options = {}) {
   }
 
   return {
+    /** false si BACKEND_BASE_URL faltaba o era inválida; usar para no registrar handlers. */
+    get isConfigured() {
+      return !disabled;
+    },
+
     /**
-     * GET /api/telegram/tenants?telegram_id=X
+     * GET ${baseUrl}/api/telegram/tenants?telegram_id=...
      * @param {string|number} telegramId - ctx.from.id
-     * @returns {Promise<{ ok: boolean, tenants?: Array<{ tenantId: number, tenantName: string, gates: Array<{ gateId: number, gateName: string }> }>, error?: string }>}
+     * @returns {Promise<{ ok: boolean, tenants?: Array, error?: string }>}
      */
     async getTenants(telegramId) {
-      const q = encodeURIComponent(String(telegramId));
-      const res = await request("GET", `/api/telegram/tenants?telegram_id=${q}`);
+      const query = encodeURIComponent(String(telegramId));
+      const path = `${BACKEND_PATH_TENANTS}?telegram_id=${query}`;
+      const res = await request("GET", path);
       if (!res.ok) {
-        return { ok: false, tenants: [], error: res.error || res.data?.error || "Error al cargar edificios." };
+        return {
+          ok: false,
+          tenants: [],
+          error: res.error || res.data?.error || "Error al cargar edificios.",
+        };
       }
       const tenants = res.data?.tenants ?? [];
       return { ok: true, tenants };
     },
 
     /**
-     * POST /api/telegram/command
-     * Contrato de respuesta del backend:
-     * - 200 + { accepted: true } → comando aceptado
-     * - 403 + { accepted: false, reason: "FORBIDDEN" } → sin permiso
-     * - 400 + { accepted: false, reason: "INVALID_ACTION" } → acción no válida
-     * - 500 u otro → error de servidor
-     *
+     * POST ${baseUrl}/api/telegram/command con { telegramId, gateId, action }
      * @param {string|number} telegramId - ctx.from.id
      * @param {string|number} gateId
-     * @param {string} action - e.g. "OPEN"
-     * @returns {Promise<{ accepted: boolean, reason?: 'FORBIDDEN'|'INVALID_ACTION'|'ERROR'|'UNKNOWN', error?: string }>}
+     * @param {string} action - ej. "OPEN"
+     * @returns {Promise<{ accepted: boolean, reason?: string, error?: string }>}
      */
     async executeCommand(telegramId, gateId, action) {
-      const res = await request("POST", "/api/telegram/command", {
+      const body = {
         telegramId,
         gateId,
         action: String(action).trim(),
-      });
+      };
+      const res = await request("POST", BACKEND_PATH_COMMAND, body);
       if (!res.ok) {
         return {
           accepted: false,
