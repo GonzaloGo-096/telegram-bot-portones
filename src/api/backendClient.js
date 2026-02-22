@@ -35,7 +35,7 @@ async function parseJsonSafe(res) {
 }
 
 export function createBackendClient(baseUrl, options = {}) {
-  const { apiKey = "", log = () => {} } = options;
+  const { apiKey = "", botSecret = "", log = () => {} } = options;
   const base = normalizeBaseUrl(baseUrl);
   const disabled = base === "";
 
@@ -43,7 +43,7 @@ export function createBackendClient(baseUrl, options = {}) {
     log("BackendClient: BACKEND_BASE_URL inválida o vacía. Cliente deshabilitado.");
   }
 
-  async function request(method, path, body) {
+  async function request(method, path, body, extraHeaders = {}) {
     const url = buildUrl(base, path);
     if (!url) {
       return { ok: false, status: 0, data: null, error: "Backend no configurado." };
@@ -62,6 +62,7 @@ export function createBackendClient(baseUrl, options = {}) {
             ...(body === undefined ? {} : { "Content-Type": "application/json" }),
             "X-Request-Id": requestId,
             ...(apiKey ? { "X-API-Key": apiKey } : {}),
+            ...extraHeaders,
           },
           body: body === undefined ? undefined : JSON.stringify(body),
           signal: controller.signal,
@@ -69,7 +70,14 @@ export function createBackendClient(baseUrl, options = {}) {
         clearTimeout(timeoutId);
 
         const data = await parseJsonSafe(res);
-        if (res.ok) return { ok: true, status: res.status, data };
+        if (res.ok) {
+          log("BackendClient request OK", {
+            method,
+            url,
+            status: res.status,
+          });
+          return { ok: true, status: res.status, data };
+        }
 
         lastError = {
           status: res.status,
@@ -92,7 +100,13 @@ export function createBackendClient(baseUrl, options = {}) {
       }
     }
 
-    log("BackendClient request fallido", { method, path, status: lastError?.status, error: lastError?.error });
+    log("BackendClient request fallido", {
+      method,
+      url,
+      status: lastError?.status,
+      error: lastError?.error,
+      errorBody: lastError?.data ?? null,
+    });
     return {
       ok: false,
       status: lastError?.status || 0,
@@ -106,34 +120,57 @@ export function createBackendClient(baseUrl, options = {}) {
       return !disabled;
     },
 
-    // GET /api/usuarios/telegram/{telegram_id}
-    async getUserByTelegramId(telegramId) {
+    // GET /api/telegram/menu?telegram_id=<id>
+    async getMenu(telegramId) {
       const encoded = encodeURIComponent(String(telegramId));
-      return request("GET", `/api/usuarios/telegram/${encoded}`);
+      return request("GET", `/api/telegram/menu?telegram_id=${encoded}`);
     },
 
-    // GET /api/portones/grupos/{usuario_id}
-    async getGateGroups(userId) {
-      const encoded = encodeURIComponent(String(userId));
-      return request("GET", `/api/portones/grupos/${encoded}`);
+    // GET /api/telegram/grupos-portones?telegram_id=<id>
+    async getGateGroups(telegramId) {
+      const encoded = encodeURIComponent(String(telegramId));
+      return request("GET", `/api/telegram/grupos-portones?telegram_id=${encoded}`);
     },
 
-    // GET /api/portones/{grupo_id}
-    async getGatesByGroup(groupId) {
-      const encoded = encodeURIComponent(String(groupId));
-      return request("GET", `/api/portones/${encoded}`);
+    // GET /api/telegram/portones?grupo_id=<id>&telegram_id=<id>
+    async getGatesByGroup(groupId, telegramId) {
+      const encodedGroup = encodeURIComponent(String(groupId));
+      const encodedUser = encodeURIComponent(String(telegramId));
+      return request("GET", `/api/telegram/portones?grupo_id=${encodedGroup}&telegram_id=${encodedUser}`);
     },
 
-    // POST /api/portones/{porton_id}/abrir
-    async openGate(portonId) {
+    // POST /api/telegram/bot/portones/:id/abrir
+    async openGate(portonId, telegramId) {
       const encoded = encodeURIComponent(String(portonId));
-      return request("POST", `/api/portones/${encoded}/abrir`, {});
+      const result = await request(
+        "POST",
+        `/api/telegram/bot/portones/${encoded}/abrir`,
+        { telegramId: String(telegramId) },
+        {
+          ...(botSecret ? { "x-bot-secret": botSecret } : {}),
+        }
+      );
+
+      if (result.ok) return result;
+      if (result.status === 401) {
+        return { ...result, error: "Credencial interna del bot inválida o ausente." };
+      }
+      if (result.status === 403) {
+        return { ...result, error: "Sin acceso al portón solicitado." };
+      }
+      if (result.status === 404) {
+        return { ...result, error: "Usuario Telegram o portón no encontrado." };
+      }
+      if (result.status === 429) {
+        return { ...result, error: "Comando repetido (debounce activo)." };
+      }
+      return result;
     },
 
-    // GET /api/cultivos/{usuario_id}
-    async getCultivos(userId) {
-      const encoded = encodeURIComponent(String(userId));
-      return request("GET", `/api/cultivos/${encoded}`);
+    // GET /api/telegram/cultivos?telegram_id=<id>
+    async getCultivos(telegramId) {
+      const encoded = encodeURIComponent(String(telegramId));
+      return request("GET", `/api/telegram/cultivos?telegram_id=${encoded}`);
     },
   };
 }

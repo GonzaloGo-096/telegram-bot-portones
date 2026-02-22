@@ -41,10 +41,16 @@ export function resolveUserFromPayload(payload, telegramId) {
     return { id: null, modules: [] };
   }
 
-  const user = payload.usuario || payload.user || payload.data || payload;
-  const userId = user?.id ?? user?.usuario_id ?? user?.user_id ?? null;
+  const root = payload?.data ?? payload;
 
-  const modulesRaw = user?.modulos ?? user?.modules ?? payload?.modulos ?? payload?.modules ?? [];
+  const modulesRaw =
+    root?.modulos ??
+    root?.modules ??
+    root?.menu?.modulos ??
+    root?.menu?.modules ??
+    root?.usuario?.modulos ??
+    root?.usuario?.modules ??
+    [];
   let modules = [];
   if (Array.isArray(modulesRaw)) {
     modules = modulesRaw.map((module) =>
@@ -59,8 +65,8 @@ export function resolveUserFromPayload(payload, telegramId) {
   }
 
   return {
-    id: userId,
-    telegramId: user?.telegram_id ?? telegramId,
+    id: root?.id ?? root?.usuario_id ?? root?.user_id ?? null,
+    telegramId: root?.telegram_id ?? telegramId,
     modules: modules.filter(Boolean),
   };
 }

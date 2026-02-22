@@ -22,6 +22,7 @@ const BACKEND_BASE_URL =
   "";
 const BACKEND_API_KEY =
   process.env.BACKEND_API_KEY?.trim() || process.env.CONTROLADOR_API_KEY?.trim() || "";
+const TELEGRAM_BOT_INTERNAL_SECRET = process.env.TELEGRAM_BOT_INTERNAL_SECRET?.trim() || "";
 
 const state = {
   serverStartedAt: null,
@@ -43,6 +44,9 @@ if (!BACKEND_BASE_URL) {
   log(
     "BACKEND_BASE_URL (o CONTROLADOR_BASE_URL) no está definido. Definilo en .env para que el bot se comunique con el backend."
   );
+}
+if (!TELEGRAM_BOT_INTERNAL_SECRET) {
+  log("TELEGRAM_BOT_INTERNAL_SECRET no está definido. El backend responderá 401 al abrir portones.");
 }
 
 process.on("unhandledRejection", (reason) => {
@@ -88,6 +92,7 @@ function genRequestId() {
 
 const backendClient = createBackendClient(BACKEND_BASE_URL, {
   apiKey: BACKEND_API_KEY,
+  botSecret: TELEGRAM_BOT_INTERNAL_SECRET,
   log,
 });
 

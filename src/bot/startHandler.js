@@ -4,7 +4,7 @@ import { buildMenuPrincipalKeyboard, menuPrincipalText } from "./render.js";
 /**
  * Handler de /start:
  * 1) Obtiene telegram_id desde el update.
- * 2) Consulta /api/usuarios/telegram/{telegram_id}.
+ * 2) Consulta endpoint de menú Telegram del backend.
  * 3) Renderiza módulos activos.
  */
 export function registerStartHandler(bot, { backendClient, userSessions, log = () => {} } = {}) {
@@ -14,21 +14,15 @@ export function registerStartHandler(bot, { backendClient, userSessions, log = (
     if (!chatId || !telegramId) return;
 
     try {
-      const response = await backendClient.getUserByTelegramId(telegramId);
+      const response = await backendClient.getMenu(telegramId);
       if (!response.ok) {
-        await bot.sendMessage(chatId, `⚠️ ${response.error || "No se pudo cargar tu perfil."}`);
+        await bot.sendMessage(chatId, `⚠️ ${response.error || "No se pudo cargar el menú."}`);
         return;
       }
 
       const user = resolveUserFromPayload(response.data, telegramId);
-      if (!user.id) {
-        await bot.sendMessage(chatId, "⚠️ No se pudo identificar el usuario en el backend.");
-        return;
-      }
-
       userSessions.set(chatId, {
         telegramId: user.telegramId || telegramId,
-        userId: user.id,
       });
 
       const keyboard = buildMenuPrincipalKeyboard(user.modules);

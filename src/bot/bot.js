@@ -8,7 +8,7 @@ import { registerCommands } from "./commands.js";
 function hasValidBackendClient(client) {
   return (
     client &&
-    typeof client.getUserByTelegramId === "function" &&
+    typeof client.getMenu === "function" &&
     typeof client.getGateGroups === "function" &&
     typeof client.getGatesByGroup === "function" &&
     typeof client.getCultivos === "function" &&
