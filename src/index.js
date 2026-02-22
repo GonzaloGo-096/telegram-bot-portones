@@ -22,6 +22,8 @@ const BACKEND_BASE_URL =
   "";
 const BACKEND_API_KEY =
   process.env.BACKEND_API_KEY?.trim() || process.env.CONTROLADOR_API_KEY?.trim() || "";
+const TELEGRAM_USER_JWT_MAP = process.env.TELEGRAM_USER_JWT_MAP?.trim() || "{}";
+const TELEGRAM_DEFAULT_JWT = process.env.TELEGRAM_DEFAULT_JWT?.trim() || "";
 
 const state = {
   serverStartedAt: null,
@@ -100,6 +102,8 @@ if (BACKEND_BASE_URL) {
 const bot = createBot({
   botToken: BOT_TOKEN,
   backendClient,
+  tokenMapRaw: TELEGRAM_USER_JWT_MAP,
+  defaultJwt: TELEGRAM_DEFAULT_JWT,
   log,
 });
 
@@ -203,7 +207,7 @@ app.post(WEBHOOK_PATH, (req, res) => {
     log("POST /bot sin body, ignorado.");
     return;
   }
-  bot.handleUpdate(req.body).catch((err) => {
+  bot.processUpdate(req.body).catch((err) => {
     log("Error al procesar update:", { error: err.message });
   });
 });
@@ -229,10 +233,10 @@ server = app.listen(PORT, "0.0.0.0", async () => {
   try {
     log("Intentando setWebhook", { url: WEBHOOK_URL, hasSecret: !!WEBHOOK_SECRET });
     const setWebhookOpts = WEBHOOK_SECRET ? { secret_token: WEBHOOK_SECRET } : {};
-    await bot.telegram.setWebhook(WEBHOOK_URL, setWebhookOpts);
+    await bot.setWebHook(WEBHOOK_URL, setWebhookOpts);
     state.webhookConfigured = true;
     state.webhookError = null;
-    const info = await bot.telegram.getWebhookInfo();
+    const info = await bot.getWebHookInfo();
     log("Webhook configurado correctamente", {
       url: info.url,
       pending: info.pending_update_count,

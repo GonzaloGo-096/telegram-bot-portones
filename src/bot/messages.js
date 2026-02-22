@@ -10,7 +10,7 @@ export const errors = {
   loadBuildings: "No pudimos cargar los edificios. Intentá de nuevo más tarde.",
   noBuildings: "No tenés acceso a ningún edificio. Contactá al administrador.",
   loadGates: "Error al cargar portones. Intentá de nuevo.",
-  noGates: "No tenés acceso a ningún portón en este edificio.",
+  noGates: "No tenés acceso a ningún portón.",
   commandFailed: "No se pudo enviar el comando. Intentá de nuevo.",
 };
 

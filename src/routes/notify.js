@@ -40,7 +40,7 @@ function validateNotifyBody(body) {
 /**
  * Registra POST /api/telegram/notify. El backend llama con la lista; el bot solo envía.
  * @param {object} app - Express app
- * @param {object} bot - Instancia Telegraf
+ * @param {object} bot - Instancia node-telegram-bot-api
  * @param {function} log
  * @param {function} [logReq]
  */
@@ -68,7 +68,7 @@ export function registerNotifyRoute(app, bot, log, logReq = () => {}) {
         log("Notify: telegramUserId inválido", { telegramUserId });
         continue;
       }
-      bot.telegram
+      bot
         .sendMessage(chatId, message)
         .then(() => log("Notify: enviado", { chatId }))
         .catch((err) => log("Notify: error al enviar", { chatId, error: err.message }));

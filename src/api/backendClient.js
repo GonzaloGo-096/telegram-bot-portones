@@ -1,34 +1,10 @@
 /**
- * Cliente HTTP al backend. Único punto de comunicación bot → backend.
- *
- * Requisitos:
- * - BACKEND_BASE_URL obligatoria; si falta, no se hace fetch (evita "Failed to parse URL").
- * - GET /api/telegram/tenants, POST /api/telegram/command.
- * - Headers: X-Request-Id, X-API-Key opcional, Content-Type solo con body.
- * - Timeout 10s, 2 reintentos para 5xx/red; 4xx (salvo 429) sin reintento.
- * - Respuestas normalizadas para consumo por handlers.
- *
- * Contrato del backend:
- * - GET /api/telegram/tenants?telegram_id={id}
- *   → 200: { tenants: [ { tenantId, tenantName, gates: [ { gateId, gateName } ] } ] }
- *   → 400/500: { error } o body de error
- * - POST /api/telegram/command
- *   → Body: { telegramId, gateId, action }
- *   → 200: { accepted: true } | { accepted: false, reason: "FORBIDDEN" | "INVALID_ACTION" }
- *   → 403/400/500 según razón
+ * Cliente HTTP bot -> backend para apertura de portones desde Telegram.
  */
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RETRIES = 2;
-const BACKEND_PATH_TENANTS = "/api/telegram/tenants";
-const BACKEND_PATH_COMMAND = "/api/telegram/command";
 
-/**
- * Normaliza la base URL y exige que sea absoluta (http/https).
- * En Node.js fetch() solo acepta URLs absolutas; una relativa como /api/... causa "Failed to parse URL".
- * @param {string} baseUrl
- * @returns {string} URL sin barra final, o "" si no válida o no absoluta
- */
 function normalizeBaseUrl(baseUrl) {
   if (baseUrl == null || typeof baseUrl !== "string") return "";
   const trimmed = baseUrl.trim();
@@ -37,70 +13,52 @@ function normalizeBaseUrl(baseUrl) {
   return trimmed.replace(/\/+$/, "");
 }
 
-/**
- * Genera un ID único por petición (para X-Request-Id).
- * @returns {string}
- */
 function genRequestId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/**
- * Construye la URL absoluta. Solo devuelve valor si base es http(s) y path válido (evita "Failed to parse URL").
- * @param {string} baseUrl - Base ya normalizada (debe ser http:// o https://)
- * @param {string} path - Path (ej. /api/telegram/tenants?telegram_id=...)
- * @returns {string|null} URL absoluta o null para no llamar a fetch
- */
-function buildFullUrl(baseUrl, path) {
-  if (!baseUrl || typeof path !== "string") return null;
-  if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) return null;
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return `${baseUrl}${p}`;
+function buildUrl(baseUrl, path) {
+  if (!baseUrl || !path) return null;
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${baseUrl}${cleanPath}`;
 }
 
-/**
- * Crea el cliente HTTP al backend.
- *
- * @param {string} baseUrl - process.env.BACKEND_BASE_URL (obligatoria en producción)
- * @param {object} [options]
- * @param {string} [options.apiKey] - process.env.BACKEND_API_KEY (opcional)
- * @param {function} [options.log] - Logger inyectable para tests y producción
- * @returns {{ getTenants: (telegramId: string|number) => Promise<{ok: boolean, tenants?: array, error?: string}>, executeCommand: (telegramId, gateId, action) => Promise<{accepted: boolean, reason?: string, error?: string}> }}
- */
+async function readJsonSafe(res) {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
 export function createBackendClient(baseUrl, options = {}) {
   const { apiKey = "", log = () => {} } = options;
   const base = normalizeBaseUrl(baseUrl);
   const disabled = base === "";
 
   if (disabled) {
-    log(
-      "BackendClient: BACKEND_BASE_URL no está definida o no es una URL absoluta (http:// o https://). No se realizarán llamadas al backend."
-    );
+    log("BackendClient: BACKEND_BASE_URL inválida o vacía. Cliente deshabilitado.");
   }
 
-  /**
-   * Realiza una petición HTTP. Si el cliente está deshabilitado (sin base URL), no llama a fetch.
-   * @param {string} method - GET | POST
-   * @param {string} path - Path absoluto (ej. /api/telegram/tenants)
-   * @param {object|null} body - Body para POST; null para GET
-   * @returns {Promise<{ ok: boolean, status?: number, data?: object, error?: string }>}
-   */
-  async function request(method, path, body = null) {
-    const fullUrl = buildFullUrl(base, path);
-    if (!fullUrl) {
+  async function post(path, body, headers = {}) {
+    const url = buildUrl(base, path);
+    if (!url) {
       return {
         ok: false,
         status: 0,
         data: null,
-        error: "Backend no configurado (BACKEND_BASE_URL faltante o inválida).",
+        error: "Backend no configurado.",
       };
     }
 
     const requestId = genRequestId();
-    const headers = {
+    const finalHeaders = {
+      "Content-Type": "application/json",
       "X-Request-Id": requestId,
-      ...(body !== null && body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(apiKey ? { "X-API-Key": apiKey } : {}),
+      ...headers,
     };
 
     let lastError = null;
@@ -108,133 +66,105 @@ export function createBackendClient(baseUrl, options = {}) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-        const res = await fetch(fullUrl, {
-          method,
-          headers,
-          body: body != null ? JSON.stringify(body) : undefined,
+        const res = await fetch(url, {
+          method: "POST",
+          headers: finalHeaders,
+          body: JSON.stringify(body ?? {}),
           signal: controller.signal,
         });
-
         clearTimeout(timeoutId);
 
-        const text = await res.text();
-        let data = null;
-        try {
-          data = text ? JSON.parse(text) : null;
-        } catch {
-          data = null;
-        }
-
+        const data = await readJsonSafe(res);
         if (res.ok) {
           return { ok: true, status: res.status, data };
         }
 
-        lastError = { status: res.status, data, text: text?.slice(0, 200) };
-        log("BackendClient: respuesta no OK", { requestId, method, path, ...lastError });
+        lastError = {
+          status: res.status,
+          data,
+          message: data?.error || `HTTP ${res.status}`,
+        };
 
-        // 4xx (excepto 429) no se reintenta
+        // 4xx (excepto 429) no se reintenta.
         if (res.status >= 400 && res.status < 500 && res.status !== 429) {
-          return {
-            ok: false,
-            status: res.status,
-            data,
-            error: data?.error || text?.slice(0, 100) || `HTTP ${res.status}`,
-          };
+          break;
         }
-      } catch (err) {
-        lastError = err.name === "AbortError" ? new Error("Timeout") : err;
-        log("BackendClient: error en intento", {
-          requestId,
-          attempt: attempt + 1,
-          maxAttempts: MAX_RETRIES + 1,
-          error: lastError?.message || String(lastError),
-        });
-        if (attempt < MAX_RETRIES) {
-          await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
-        }
+      } catch (error) {
+        lastError = {
+          status: 0,
+          data: null,
+          message: error?.name === "AbortError" ? "Timeout" : error?.message || String(error),
+        };
+      }
+
+      if (attempt < MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
       }
     }
 
-    const status = lastError?.status ?? 0;
-    const data = lastError?.data ?? null;
-    let errorMsg = lastError?.message;
-    if (!errorMsg) {
-      if (typeof data?.error === "string" && data.error.trim()) errorMsg = data.error;
-      else if (status >= 500) errorMsg = "El servidor no pudo responder. Intentá más tarde.";
-      else if (status) errorMsg = `Error del servidor (${status}). Intentá más tarde.`;
-      else errorMsg = "No se pudo conectar con el servidor. Intentá más tarde.";
-    }
+    log("BackendClient: POST fallido", { path, error: lastError?.message, status: lastError?.status });
     return {
       ok: false,
-      status: status || 0,
-      data,
-      error: errorMsg,
+      status: lastError?.status || 0,
+      data: lastError?.data || null,
+      error: lastError?.message || "No se pudo completar la operación.",
     };
   }
 
   return {
-    /** false si BACKEND_BASE_URL faltaba o era inválida; usar para no registrar handlers. */
     get isConfigured() {
       return !disabled;
     },
 
     /**
-     * GET ${baseUrl}/api/telegram/tenants?telegram_id=...
-     * @param {string|number} telegramId - ctx.from.id
-     * @returns {Promise<{ ok: boolean, tenants?: Array, error?: string }>}
+     * Llama al endpoint protegido del backend:
+     * POST /api/telegram/portones/:id/abrir
+     * El backend valida JWT + roles + account_id + debounce Redis y registra evento canal=telegram.
      */
-    async getTenants(telegramId) {
-      const query = encodeURIComponent(String(telegramId));
-      const path = `${BACKEND_PATH_TENANTS}?telegram_id=${query}`;
-      const res = await request("GET", path);
-      if (!res.ok) {
-        const raw = (res.error || res.data?.error || "").trim();
-        const generic = /error\s+desconocido|unknown\s+error/i.test(raw) || !raw;
-        const error = generic ? "No pudimos cargar los edificios. Intentá de nuevo más tarde." : raw;
+    async openGate({ gateId, jwt, telegramUserId }) {
+      const parsedGateId = Number(gateId);
+      if (!Number.isInteger(parsedGateId) || parsedGateId <= 0) {
         return {
           ok: false,
-          tenants: [],
-          error,
+          status: 400,
+          data: null,
+          error: "ID de portón inválido.",
         };
       }
-      const tenants = res.data?.tenants ?? [];
-      return { ok: true, tenants };
-    },
 
-    /**
-     * POST ${baseUrl}/api/telegram/command con { telegramId, gateId, action }
-     * @param {string|number} telegramId - ctx.from.id
-     * @param {string|number} gateId
-     * @param {string} action - ej. "OPEN"
-     * @returns {Promise<{ accepted: boolean, reason?: string, error?: string }>}
-     */
-    async executeCommand(telegramId, gateId, action) {
-      const body = {
-        telegramId,
-        gateId,
-        action: String(action).trim(),
-      };
-      const res = await request("POST", BACKEND_PATH_COMMAND, body);
-      if (!res.ok) {
+      const authHeader =
+        typeof jwt === "string" && jwt.trim() ? { Authorization: `Bearer ${jwt.trim()}` } : {};
+
+      const path = `/api/telegram/portones/${parsedGateId}/abrir`;
+      const body = { canal: "telegram", telegram_user_id: String(telegramUserId ?? "") };
+
+      const result = await post(path, body, authHeader);
+      if (result.ok) return result;
+
+      if (result.status === 403) {
         return {
-          accepted: false,
-          reason: "ERROR",
-          error: res.error || res.data?.error || "Error de conexión con el servidor.",
+          ok: false,
+          status: 403,
+          data: result.data,
+          error: "No tenés permisos para abrir este portón.",
         };
       }
-      const d = res.data;
-      if (d && d.accepted === true) {
-        return { accepted: true };
+
+      if (result.status === 429) {
+        return {
+          ok: false,
+          status: 429,
+          data: result.data,
+          error: "Intento duplicado detectado. Esperá unos segundos.",
+        };
       }
-      const reason = d?.reason || "UNKNOWN";
-      const error =
-        reason === "FORBIDDEN"
-          ? "No tenés permiso para usar este portón."
-          : reason === "INVALID_ACTION"
-            ? "Acción no válida."
-            : res.error || "Error al enviar comando.";
-      return { accepted: false, reason, error };
+
+      return {
+        ok: false,
+        status: result.status,
+        data: result.data,
+        error: result.error || "No se pudo abrir el portón.",
+      };
     },
   };
 }

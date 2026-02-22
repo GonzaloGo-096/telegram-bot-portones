@@ -1,11 +1,11 @@
 /**
- * Handler /start: obtiene tenants del backend y renderiza botones.
- * Solo ctx → backendClient → render. Sin DB, permisos ni auditoría.
+ * Handler /start: obtiene gates del backend y renderiza botones por portón.
+ * Backend devuelve { gates: [...] }; sin paso de tenants.
  */
 
 import { Markup } from "telegraf";
 import { getTelegramUserId } from "../utils.js";
-import { errors, prompts, tenantLabel } from "../messages.js";
+import { errors, prompts, gateLabel } from "../messages.js";
 
 /**
  * @param {Telegraf} bot
@@ -24,31 +24,31 @@ export function registerStartCommand(bot, { backendClient, log } = {}) {
 
       log?.(`[start] /start de ${telegramUserId} (chat: ${chatId})`);
 
-      if (!backendClient?.getTenants) {
+      if (!backendClient?.getGates) {
         log?.("[start] backendClient no disponible");
         await ctx.reply("El servicio no está configurado. Contactá al administrador.");
         return;
       }
 
-      const { ok, tenants, error } = await backendClient.getTenants(telegramUserId);
+      const { ok, gates, error } = await backendClient.getGates(telegramUserId);
 
-      log?.(`[start] getTenants ok=${ok} tenants=${Array.isArray(tenants) ? tenants.length : 0} error=${error ?? ""}`);
+      log?.(`[start] getGates ok=${ok} gates=${Array.isArray(gates) ? gates.length : 0} error=${error ?? ""}`);
 
       if (!ok || error) {
-        await ctx.reply(error || errors.loadBuildings);
+        await ctx.reply(error || errors.loadGates);
         return;
       }
 
-      if (!tenants || tenants.length === 0) {
-        await ctx.reply(errors.noBuildings);
+      if (!gates || gates.length === 0) {
+        await ctx.reply(errors.noGates);
         return;
       }
 
-      const buttons = tenants.map((t) =>
-        Markup.button.callback(tenantLabel(t.tenantName, t.tenantId), `tenant:${t.tenantId}`)
+      const buttons = gates.map((g) =>
+        Markup.button.callback(gateLabel(g.gateName, g.gateId), `gate:${g.gateId}`)
       );
 
-      await ctx.reply(prompts.selectBuilding, Markup.inlineKeyboard(buttons, { columns: 1 }));
+      await ctx.reply(prompts.selectGate, Markup.inlineKeyboard(buttons, { columns: 1 }));
     } catch (err) {
       log?.("[start] Error", { message: err?.message, stack: err?.stack });
       try {
