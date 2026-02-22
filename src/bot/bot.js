@@ -6,7 +6,12 @@ import TelegramBot from "node-telegram-bot-api";
 import { registerCommands } from "./commands.js";
 
 function hasValidBackendClient(client) {
-  return client && typeof client.openGate === "function" && client.isConfigured !== false;
+  return (
+    client &&
+    typeof client.openGate === "function" &&
+    typeof client.getBotMenu === "function" &&
+    client.isConfigured !== false
+  );
 }
 
 export function createBot({ botToken, backendClient, log = () => {} }) {

@@ -1,6 +1,6 @@
 /**
  * Cliente HTTP único del bot hacia backend.
- * Solo consume el endpoint interno de apertura.
+ * Consume endpoints internos del bot (menú y apertura).
  */
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
@@ -118,6 +118,47 @@ export function createBackendClient(baseUrl, options = {}) {
   return {
     get isConfigured() {
       return !disabled;
+    },
+
+    /**
+     * Obtiene menú y módulos habilitados para el usuario Telegram.
+     * Endpoint vigente:
+     * GET /api/telegram/bot/menu?telegramId=...
+     */
+    async getBotMenu(telegramId) {
+      const encoded = encodeURIComponent(String(telegramId));
+      const result = await request(
+        "GET",
+        `/api/telegram/bot/menu?telegramId=${encoded}`,
+        undefined,
+        {
+          ...(botSecret ? { "x-bot-secret": botSecret } : {}),
+        }
+      );
+      if (!result.ok) return result;
+
+      const source = result.data?.data ?? result.data ?? {};
+      const rawModules = Array.isArray(source.modules) ? source.modules : [];
+      const modules = rawModules
+        .map((moduleItem) => {
+          if (typeof moduleItem === "string") {
+            return { key: moduleItem.toLowerCase(), label: moduleItem, enabled: true };
+          }
+          const key = String(moduleItem?.key ?? moduleItem?.code ?? moduleItem?.nombre ?? "").toLowerCase();
+          const label = String(moduleItem?.label ?? moduleItem?.name ?? moduleItem?.nombre ?? key).trim();
+          const enabled = moduleItem?.enabled !== false;
+          return { key, label, enabled };
+        })
+        .filter((moduleItem) => moduleItem.key && moduleItem.enabled);
+
+      return {
+        ok: true,
+        status: result.status,
+        data: {
+          user: source.user ?? null,
+          modules,
+        },
+      };
     },
 
     // POST /api/telegram/bot/portones/:id/abrir
