@@ -1,5 +1,6 @@
 /**
- * Cliente HTTP bot -> backend para apertura de portones desde Telegram.
+ * Cliente HTTP del bot.
+ * El backend concentra toda la lógica de permisos y validación.
  */
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -23,7 +24,7 @@ function buildUrl(baseUrl, path) {
   return `${baseUrl}${cleanPath}`;
 }
 
-async function readJsonSafe(res) {
+async function parseJsonSafe(res) {
   const text = await res.text();
   if (!text) return null;
   try {
@@ -42,58 +43,47 @@ export function createBackendClient(baseUrl, options = {}) {
     log("BackendClient: BACKEND_BASE_URL inválida o vacía. Cliente deshabilitado.");
   }
 
-  async function post(path, body, headers = {}) {
+  async function request(method, path, body) {
     const url = buildUrl(base, path);
     if (!url) {
-      return {
-        ok: false,
-        status: 0,
-        data: null,
-        error: "Backend no configurado.",
-      };
+      return { ok: false, status: 0, data: null, error: "Backend no configurado." };
     }
-
-    const requestId = genRequestId();
-    const finalHeaders = {
-      "Content-Type": "application/json",
-      "X-Request-Id": requestId,
-      ...(apiKey ? { "X-API-Key": apiKey } : {}),
-      ...headers,
-    };
 
     let lastError = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const requestId = genRequestId();
+
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
         const res = await fetch(url, {
-          method: "POST",
-          headers: finalHeaders,
-          body: JSON.stringify(body ?? {}),
+          method,
+          headers: {
+            ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+            "X-Request-Id": requestId,
+            ...(apiKey ? { "X-API-Key": apiKey } : {}),
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
 
-        const data = await readJsonSafe(res);
-        if (res.ok) {
-          return { ok: true, status: res.status, data };
-        }
+        const data = await parseJsonSafe(res);
+        if (res.ok) return { ok: true, status: res.status, data };
 
         lastError = {
           status: res.status,
           data,
-          message: data?.error || `HTTP ${res.status}`,
+          error: data?.error || `HTTP ${res.status}`,
         };
 
-        // 4xx (excepto 429) no se reintenta.
-        if (res.status >= 400 && res.status < 500 && res.status !== 429) {
-          break;
-        }
+        if (res.status >= 400 && res.status < 500 && res.status !== 429) break;
       } catch (error) {
+        clearTimeout(timeoutId);
         lastError = {
           status: 0,
           data: null,
-          message: error?.name === "AbortError" ? "Timeout" : error?.message || String(error),
+          error: error?.name === "AbortError" ? "Timeout" : error?.message || String(error),
         };
       }
 
@@ -102,12 +92,12 @@ export function createBackendClient(baseUrl, options = {}) {
       }
     }
 
-    log("BackendClient: POST fallido", { path, error: lastError?.message, status: lastError?.status });
+    log("BackendClient request fallido", { method, path, status: lastError?.status, error: lastError?.error });
     return {
       ok: false,
       status: lastError?.status || 0,
       data: lastError?.data || null,
-      error: lastError?.message || "No se pudo completar la operación.",
+      error: lastError?.error || "No se pudo completar la operación.",
     };
   }
 
@@ -116,55 +106,34 @@ export function createBackendClient(baseUrl, options = {}) {
       return !disabled;
     },
 
-    /**
-     * Llama al endpoint protegido del backend:
-     * POST /api/telegram/portones/:id/abrir
-     * El backend valida JWT + roles + account_id + debounce Redis y registra evento canal=telegram.
-     */
-    async openGate({ gateId, jwt, telegramUserId }) {
-      const parsedGateId = Number(gateId);
-      if (!Number.isInteger(parsedGateId) || parsedGateId <= 0) {
-        return {
-          ok: false,
-          status: 400,
-          data: null,
-          error: "ID de portón inválido.",
-        };
-      }
+    // GET /api/usuarios/telegram/{telegram_id}
+    async getUserByTelegramId(telegramId) {
+      const encoded = encodeURIComponent(String(telegramId));
+      return request("GET", `/api/usuarios/telegram/${encoded}`);
+    },
 
-      const authHeader =
-        typeof jwt === "string" && jwt.trim() ? { Authorization: `Bearer ${jwt.trim()}` } : {};
+    // GET /api/portones/grupos/{usuario_id}
+    async getGateGroups(userId) {
+      const encoded = encodeURIComponent(String(userId));
+      return request("GET", `/api/portones/grupos/${encoded}`);
+    },
 
-      const path = `/api/telegram/portones/${parsedGateId}/abrir`;
-      const body = { canal: "telegram", telegram_user_id: String(telegramUserId ?? "") };
+    // GET /api/portones/{grupo_id}
+    async getGatesByGroup(groupId) {
+      const encoded = encodeURIComponent(String(groupId));
+      return request("GET", `/api/portones/${encoded}`);
+    },
 
-      const result = await post(path, body, authHeader);
-      if (result.ok) return result;
+    // POST /api/portones/{porton_id}/abrir
+    async openGate(portonId) {
+      const encoded = encodeURIComponent(String(portonId));
+      return request("POST", `/api/portones/${encoded}/abrir`, {});
+    },
 
-      if (result.status === 403) {
-        return {
-          ok: false,
-          status: 403,
-          data: result.data,
-          error: "No tenés permisos para abrir este portón.",
-        };
-      }
-
-      if (result.status === 429) {
-        return {
-          ok: false,
-          status: 429,
-          data: result.data,
-          error: "Intento duplicado detectado. Esperá unos segundos.",
-        };
-      }
-
-      return {
-        ok: false,
-        status: result.status,
-        data: result.data,
-        error: result.error || "No se pudo abrir el portón.",
-      };
+    // GET /api/cultivos/{usuario_id}
+    async getCultivos(userId) {
+      const encoded = encodeURIComponent(String(userId));
+      return request("GET", `/api/cultivos/${encoded}`);
     },
   };
 }

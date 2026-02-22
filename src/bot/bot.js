@@ -3,21 +3,27 @@
  */
 
 import TelegramBot from "node-telegram-bot-api";
-import { createAuthService } from "./auth.js";
 import { registerCommands } from "./commands.js";
 
 function hasValidBackendClient(client) {
-  return client && typeof client.openGate === "function" && client.isConfigured !== false;
+  return (
+    client &&
+    typeof client.getUserByTelegramId === "function" &&
+    typeof client.getGateGroups === "function" &&
+    typeof client.getGatesByGroup === "function" &&
+    typeof client.getCultivos === "function" &&
+    typeof client.openGate === "function" &&
+    client.isConfigured !== false
+  );
 }
 
-export function createBot({ botToken, backendClient, tokenMapRaw, defaultJwt, log = () => {} }) {
+export function createBot({ botToken, backendClient, log = () => {} }) {
   if (!botToken) {
     log("BOT_TOKEN no definido. Bot desactivado.");
     return null;
   }
 
   const bot = new TelegramBot(botToken, { polling: false });
-  const authService = createAuthService({ tokenMapRaw, defaultJwt, log });
 
   if (!hasValidBackendClient(backendClient)) {
     log("Backend no configurado: bot inicializado sin handlers.");
@@ -32,7 +38,7 @@ export function createBot({ botToken, backendClient, tokenMapRaw, defaultJwt, lo
     return bot;
   }
 
-  registerCommands(bot, { backendClient, authService, log });
-  log("Bot listo: comandos /start, /help y /abrir registrados.");
+  registerCommands(bot, { backendClient, log });
+  log("Bot listo: flujo jerárquico /start + navegación inline registrado.");
   return bot;
 }

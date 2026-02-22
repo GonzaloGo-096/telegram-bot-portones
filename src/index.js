@@ -22,8 +22,6 @@ const BACKEND_BASE_URL =
   "";
 const BACKEND_API_KEY =
   process.env.BACKEND_API_KEY?.trim() || process.env.CONTROLADOR_API_KEY?.trim() || "";
-const TELEGRAM_USER_JWT_MAP = process.env.TELEGRAM_USER_JWT_MAP?.trim() || "{}";
-const TELEGRAM_DEFAULT_JWT = process.env.TELEGRAM_DEFAULT_JWT?.trim() || "";
 
 const state = {
   serverStartedAt: null,
@@ -102,8 +100,6 @@ if (BACKEND_BASE_URL) {
 const bot = createBot({
   botToken: BOT_TOKEN,
   backendClient,
-  tokenMapRaw: TELEGRAM_USER_JWT_MAP,
-  defaultJwt: TELEGRAM_DEFAULT_JWT,
   log,
 });
 
