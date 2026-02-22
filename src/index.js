@@ -173,7 +173,7 @@ app.get("/ready", (req, res) => {
   });
 });
 
-app.post(WEBHOOK_PATH, (req, res) => {
+app.post(WEBHOOK_PATH, async (req, res) => {
   const hasBody = !!req.body && Object.keys(req.body || {}).length > 0;
   const updateId = req.body?.update_id;
   log("POST /bot recibido", {
@@ -193,6 +193,7 @@ app.post(WEBHOOK_PATH, (req, res) => {
     }
   }
 
+  // Telegram requiere respuesta rápida al webhook para evitar retries/timeouts.
   res.status(200).end();
 
   if (!bot) {
@@ -203,9 +204,17 @@ app.post(WEBHOOK_PATH, (req, res) => {
     log("POST /bot sin body, ignorado.");
     return;
   }
-  bot.processUpdate(req.body).catch((err) => {
-    log("Error al procesar update:", { error: err.message });
-  });
+
+  try {
+    // processUpdate puede devolver void o Promise según versión/lib interna.
+    await Promise.resolve(bot.processUpdate(req.body));
+  } catch (err) {
+    log("Error al procesar update", {
+      requestId: req.requestId,
+      update_id: updateId ?? null,
+      error: err?.message || String(err),
+    });
+  }
 });
 
 registerNotifyRoute(app, bot, log, logReq);

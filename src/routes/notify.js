@@ -47,31 +47,43 @@ function validateNotifyBody(body) {
 export function registerNotifyRoute(app, bot, log, logReq = () => {}) {
   app.post("/api/telegram/notify", async (req, res) => {
     logReq(req, res);
-    const { valid, deliveries, error } = validateNotifyBody(req.body);
+    try {
+      const { valid, deliveries, error } = validateNotifyBody(req.body);
 
-    if (!valid) {
-      log("Notify: body inválido", { error, requestId: req.requestId });
-      res.status(400).json({ ok: false, error: error || notifyValidation.bodyInvalid });
-      return;
-    }
-
-    res.status(202).json({ ok: true, received: deliveries.length });
-
-    if (!bot) {
-      log("Notify: bot no disponible");
-      return;
-    }
-
-    for (const { telegramUserId, message } of deliveries) {
-      const chatId = Number(telegramUserId);
-      if (Number.isNaN(chatId)) {
-        log("Notify: telegramUserId inválido", { telegramUserId });
-        continue;
+      if (!valid) {
+        log("Notify: body inválido", { error, requestId: req.requestId });
+        res.status(400).json({ ok: false, error: error || notifyValidation.bodyInvalid });
+        return;
       }
-      bot
-        .sendMessage(chatId, message)
-        .then(() => log("Notify: enviado", { chatId }))
-        .catch((err) => log("Notify: error al enviar", { chatId, error: err.message }));
+
+      res.status(202).json({ ok: true, received: deliveries.length });
+
+      if (!bot) {
+        log("Notify: bot no disponible");
+        return;
+      }
+
+      for (const { telegramUserId, message } of deliveries) {
+        const chatId = Number(telegramUserId);
+        if (Number.isNaN(chatId)) {
+          log("Notify: telegramUserId inválido", { telegramUserId });
+          continue;
+        }
+        try {
+          await bot.sendMessage(chatId, message);
+          log("Notify: enviado", { chatId });
+        } catch (err) {
+          log("Notify: error al enviar", { chatId, error: err?.message || String(err) });
+        }
+      }
+    } catch (err) {
+      log("Notify: error inesperado", {
+        requestId: req.requestId,
+        error: err?.message || String(err),
+      });
+      if (!res.headersSent) {
+        res.status(500).json({ ok: false, error: "Error interno enviando notificaciones." });
+      }
     }
   });
 }
