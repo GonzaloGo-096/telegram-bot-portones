@@ -15,11 +15,13 @@ const PUBLIC_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.PUBLIC_DO
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET?.trim() || "";
 const WEBHOOK_PATH = "/bot";
 const WEBHOOK_URL = PUBLIC_DOMAIN ? `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}` : null;
-// BACKEND_BASE_URL es la opción principal; si no existe, se usa CONTROLADOR_BASE_URL (compatibilidad)
+// BACKEND_URL es la opción principal; se mantienen aliases por compatibilidad.
 const BACKEND_BASE_URL =
+  process.env.BACKEND_URL?.trim() ||
   process.env.BACKEND_BASE_URL?.trim() ||
   process.env.CONTROLADOR_BASE_URL?.trim() ||
   "";
+const BACKEND_TIMEOUT_MS = Number(process.env.BACKEND_TIMEOUT_MS) || 10_000;
 const BACKEND_API_KEY =
   process.env.BACKEND_API_KEY?.trim() || process.env.CONTROLADOR_API_KEY?.trim() || "";
 const TELEGRAM_BOT_INTERNAL_SECRET = process.env.TELEGRAM_BOT_INTERNAL_SECRET?.trim() || "";
@@ -93,6 +95,7 @@ function genRequestId() {
 const backendClient = createBackendClient(BACKEND_BASE_URL, {
   apiKey: BACKEND_API_KEY,
   botSecret: TELEGRAM_BOT_INTERNAL_SECRET,
+  timeoutMs: BACKEND_TIMEOUT_MS,
   log,
 });
 

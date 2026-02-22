@@ -6,15 +6,7 @@ import TelegramBot from "node-telegram-bot-api";
 import { registerCommands } from "./commands.js";
 
 function hasValidBackendClient(client) {
-  return (
-    client &&
-    typeof client.getMenu === "function" &&
-    typeof client.getGateGroups === "function" &&
-    typeof client.getGatesByGroup === "function" &&
-    typeof client.getCultivos === "function" &&
-    typeof client.openGate === "function" &&
-    client.isConfigured !== false
-  );
+  return client && typeof client.openGate === "function" && client.isConfigured !== false;
 }
 
 export function createBot({ botToken, backendClient, log = () => {} }) {
@@ -39,6 +31,6 @@ export function createBot({ botToken, backendClient, log = () => {} }) {
   }
 
   registerCommands(bot, { backendClient, log });
-  log("Bot listo: flujo jerárquico /start + navegación inline registrado.");
+  log("Bot listo: comandos /start, /help y /abrir registrados.");
   return bot;
 }

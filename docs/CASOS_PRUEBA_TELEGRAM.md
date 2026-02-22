@@ -1,44 +1,46 @@
-# Casos de Prueba Bot Telegram (`/abrir`)
+# Casos de Prueba Bot Telegram (flujo jerárquico)
 
 ## Variables previas
 
 - `BOT_TOKEN`
 - `BACKEND_BASE_URL`
-- `TELEGRAM_USER_JWT_MAP` (JSON con `telegramId -> jwt`)
+- `TELEGRAM_BOT_INTERNAL_SECRET`
 
-Ejemplo:
+## Caso 1: carga de menú con módulos activos
 
-```env
-TELEGRAM_USER_JWT_MAP={"111111111":"<JWT_SUPERADMIN>","222222222":"<JWT_ADMIN_CUENTA>","333333333":"<JWT_OPERADOR>"}
-```
+1. En Telegram, enviar `/start`.
+2. Resultado esperado en chat: bienvenida + botones inline de módulos activos.
+3. Verificar que solo aparezcan módulos devueltos por backend.
 
-## Caso 1: superadministrador abre cualquier porton -> OK
+## Caso 2: navegación módulos -> grupos -> portones
 
-1. En Telegram (usuario `111111111`): enviar `/abrir 10`.
-2. Resultado esperado en chat: `✅ Portón abierto correctamente.`
-3. Resultado esperado backend: HTTP `200` y evento en `eventos_porton` con `canal = "telegram"`.
+1. Presionar `Portones`.
+2. Deben mostrarse grupos permitidos.
+3. Presionar un grupo.
+4. Deben mostrarse portones de ese grupo.
+5. Debe existir botón `🔙 Volver` en cada nivel.
 
-## Caso 2: administrador_cuenta abre porton de su cuenta -> OK
+## Caso 3: apertura exitosa
 
-1. En Telegram (usuario `222222222`): enviar `/abrir <porton_de_su_account_id>`.
-2. Resultado esperado en chat: `✅ Portón abierto correctamente.`
-3. Resultado esperado backend: HTTP `200`, scoping por `account_id` correcto y evento `canal = "telegram"`.
+1. Presionar un botón de portón habilitado.
+2. Resultado esperado en chat: `✅ Comando enviado`.
+3. Resultado esperado backend: HTTP `200` en `POST /api/telegram/bot/portones/:id/abrir`.
 
-## Caso 3: operador abre porton asignado -> OK
+## Caso 4: usuario sin acceso al portón
 
-1. En Telegram (usuario `333333333`): enviar `/abrir <porton_asignado_al_operador>`.
-2. Resultado esperado en chat: `✅ Portón abierto correctamente.`
-3. Resultado esperado backend: HTTP `200` y evento `canal = "telegram"`.
+1. Presionar un portón no autorizado (forzando callback o con backend de prueba).
+2. Resultado esperado en chat: `⚠️ Sin permisos`.
+3. Resultado esperado backend: HTTP `403`.
 
-## Caso 4: operador abre porton no asignado -> 403
+## Caso 5: comando repetido (debounce)
 
-1. En Telegram (usuario `333333333`): enviar `/abrir <porton_no_asignado>`.
-2. Resultado esperado en chat: `⛔ No tenés permiso para abrir este portón.`
-3. Resultado esperado backend: HTTP `403` y sin apertura.
+1. Presionar el mismo portón dos veces de inmediato.
+2. Resultado esperado segundo intento: `⏱ Debounce (esperar antes de enviar de nuevo)`.
+3. Resultado esperado backend: HTTP `429`.
 
-## Caso 5: doble intento inmediato -> 429
+## Caso 6: secret interno faltante o inválido
 
-1. En Telegram (usuario autorizado): enviar dos veces seguidas `/abrir <porton_valido>`.
-2. Resultado esperado primer comando: `✅ Portón abierto correctamente.`
-3. Resultado esperado segundo comando inmediato: `⏱️ Ya se envió una apertura hace instantes...`
-4. Resultado esperado backend: primer request `200`, segundo request `429` por debounce (Redis, ventana ~2s).
+1. Remover o invalidar `TELEGRAM_BOT_INTERNAL_SECRET`.
+2. Intentar abrir un portón.
+3. Resultado esperado backend: HTTP `401`.
+4. Resultado esperado en chat: `⚠️ Error interno de autenticación del bot.`

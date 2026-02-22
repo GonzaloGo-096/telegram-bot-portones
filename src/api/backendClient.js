@@ -1,9 +1,9 @@
 /**
- * Cliente HTTP del bot.
- * El backend concentra toda la lógica de permisos y validación.
+ * Cliente HTTP único del bot hacia backend.
+ * Solo consume el endpoint interno de apertura.
  */
 
-const REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RETRIES = 2;
 
 function normalizeBaseUrl(baseUrl) {
@@ -35,7 +35,7 @@ async function parseJsonSafe(res) {
 }
 
 export function createBackendClient(baseUrl, options = {}) {
-  const { apiKey = "", botSecret = "", log = () => {} } = options;
+  const { apiKey = "", botSecret = "", timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, log = () => {} } = options;
   const base = normalizeBaseUrl(baseUrl);
   const disabled = base === "";
 
@@ -52,7 +52,7 @@ export function createBackendClient(baseUrl, options = {}) {
     let lastError = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       const requestId = genRequestId();
 
       try {
@@ -120,25 +120,6 @@ export function createBackendClient(baseUrl, options = {}) {
       return !disabled;
     },
 
-    // GET /api/telegram/menu?telegram_id=<id>
-    async getMenu(telegramId) {
-      const encoded = encodeURIComponent(String(telegramId));
-      return request("GET", `/api/telegram/menu?telegram_id=${encoded}`);
-    },
-
-    // GET /api/telegram/grupos-portones?telegram_id=<id>
-    async getGateGroups(telegramId) {
-      const encoded = encodeURIComponent(String(telegramId));
-      return request("GET", `/api/telegram/grupos-portones?telegram_id=${encoded}`);
-    },
-
-    // GET /api/telegram/portones?grupo_id=<id>&telegram_id=<id>
-    async getGatesByGroup(groupId, telegramId) {
-      const encodedGroup = encodeURIComponent(String(groupId));
-      const encodedUser = encodeURIComponent(String(telegramId));
-      return request("GET", `/api/telegram/portones?grupo_id=${encodedGroup}&telegram_id=${encodedUser}`);
-    },
-
     // POST /api/telegram/bot/portones/:id/abrir
     async openGate(portonId, telegramId) {
       const encoded = encodeURIComponent(String(portonId));
@@ -164,13 +145,10 @@ export function createBackendClient(baseUrl, options = {}) {
       if (result.status === 429) {
         return { ...result, error: "Comando repetido (debounce activo)." };
       }
+      if (result.status >= 500) {
+        return { ...result, error: "Error temporal del servidor." };
+      }
       return result;
-    },
-
-    // GET /api/telegram/cultivos?telegram_id=<id>
-    async getCultivos(telegramId) {
-      const encoded = encodeURIComponent(String(telegramId));
-      return request("GET", `/api/telegram/cultivos?telegram_id=${encoded}`);
     },
   };
 }
