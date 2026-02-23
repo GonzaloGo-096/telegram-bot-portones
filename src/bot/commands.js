@@ -1,4 +1,20 @@
 /**
+ * Mensaje de error según status HTTP.
+ */
+function errorMessageForStatus(status) {
+  switch (status) {
+    case 401:
+      return "⚠️ Error de autenticación interna del bot";
+    case 404:
+      return "⚠️ No encontrado. Verificá que estés registrado.";
+    case 503:
+      return "⚠️ Servicio temporalmente no disponible";
+    default:
+      return status >= 500 ? "⚠️ Error temporal del servidor" : "⚠️ No se pudo completar. Reintentá más tarde.";
+  }
+}
+
+/**
  * Registro centralizado de comandos del bot.
  * El bot solo presenta mensajes y delega toda autorización al backend.
  */
@@ -6,31 +22,92 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
   bot.on("callback_query", async (query) => {
     const data = query?.data || "";
     const chatId = query?.message?.chat?.id;
+    const telegramId = query?.from?.id;
+
     try {
+      await bot.answerCallbackQuery(query.id);
+
       if (data === "mod:portones") {
-        await bot.answerCallbackQuery(query.id);
-        if (chatId) {
-          await bot.sendMessage(chatId, "Módulo Portones activo. Usá /abrir {id_porton}.");
+        if (!chatId || !telegramId) return;
+        const result = await backendClient.getPortonGroups(telegramId);
+        if (!result.ok) {
+          log("Bot mod:portones getPortonGroups error", { status: result.status, error: result.error });
+          await bot.sendMessage(chatId, errorMessageForStatus(result.status ?? 0));
+          return;
         }
+        const groups = result.data?.groups ?? [];
+        if (groups.length === 0) {
+          await bot.sendMessage(chatId, "No tenés grupos de portones asignados.");
+          return;
+        }
+        const buttons = groups.map((g) => [
+          { text: `🚪 ${g.name || "Grupo " + g.id}`, callback_data: `PORTONES:GROUP:${g.id}` },
+        ]);
+        await bot.sendMessage(chatId, "Elegí un grupo de portones:", {
+          reply_markup: { inline_keyboard: buttons },
+        });
         return;
       }
+
+      if (data.startsWith("PORTONES:GROUP:")) {
+        const grupoId = data.replace("PORTONES:GROUP:", "").trim();
+        if (!chatId || !telegramId || !grupoId) return;
+        const result = await backendClient.getGatesByGroup(telegramId, grupoId);
+        if (!result.ok) {
+          log("Bot getGatesByGroup error", { grupoId, status: result.status });
+          await bot.sendMessage(chatId, errorMessageForStatus(result.status ?? 0));
+          return;
+        }
+        const gates = result.data?.gates ?? [];
+        const groupName = result.data?.group?.name || "Grupo";
+        if (gates.length === 0) {
+          await bot.sendMessage(chatId, `El grupo "${groupName}" no tiene portones visibles para vos.`);
+          return;
+        }
+        const buttons = gates.map((g) => [
+          {
+            text: `${g.name || "Portón " + g.id} (id: ${g.id})`,
+            callback_data: `PORTONES:GATE:${g.id}:GROUP:${grupoId}`,
+          },
+        ]);
+        await bot.sendMessage(chatId, `Portones en "${groupName}":`, {
+          reply_markup: { inline_keyboard: buttons },
+        });
+        return;
+      }
+
+      if (data.startsWith("PORTONES:GATE:")) {
+        const match = data.match(/^PORTONES:GATE:(\d+):GROUP:(\d+)$/);
+        const gateId = match?.[1];
+        const grupoId = match?.[2];
+        if (!chatId || !gateId) return;
+        const gateName = "Portón " + gateId;
+        await bot.sendMessage(
+          chatId,
+          `🚪 ${gateName}\n\nPara abrir este portón usá:\n\`/abrir ${gateId}\`\n\n(Apertura automática próximamente)`,
+          { parse_mode: "Markdown" }
+        );
+        return;
+      }
+
       if (data === "mod:cultivos") {
-        await bot.answerCallbackQuery(query.id);
         if (chatId) {
           await bot.sendMessage(chatId, "Módulo Cultivos activo. Próximamente acciones disponibles.");
         }
         return;
       }
+
       if (data.startsWith("mod:")) {
-        await bot.answerCallbackQuery(query.id);
         if (chatId) {
           await bot.sendMessage(chatId, "Módulo disponible. Próximamente acciones específicas.");
         }
         return;
       }
-      await bot.answerCallbackQuery(query.id);
     } catch (error) {
       log("Bot callback error", { data, error: error?.message || String(error) });
+      if (chatId) {
+        await bot.sendMessage(chatId, "⚠️ Ocurrió un error. Reintentá más tarde.");
+      }
     }
   });
 
@@ -41,8 +118,29 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
 
     try {
       const menu = telegramId ? await backendClient.getBotMenu(telegramId) : null;
-      const modules = Array.isArray(menu?.data?.modules) ? menu.data.modules : [];
 
+      if (!menu?.ok) {
+        log("Bot /start menu warning", {
+          telegramId: String(telegramId || ""),
+          status: menu?.status ?? 0,
+          error: menu?.error || "Sin detalle",
+          errorBody: menu?.data ?? null,
+        });
+        const errMsg =
+          menu?.status === 404 ? "⚠️ No estás registrado. Contactá al administrador." : errorMessageForStatus(menu?.status ?? 0);
+        await bot.sendMessage(chatId, errMsg);
+        return;
+      }
+
+      if (menu?.data?.requiresAccountSelection) {
+        await bot.sendMessage(
+          chatId,
+          "Tenés más de una cuenta, seleccioná una (pendiente)"
+        );
+        return;
+      }
+
+      const modules = Array.isArray(menu?.data?.modules) ? menu.data.modules : [];
       const buttons = modules.map((moduleItem) => {
         const key = String(moduleItem?.key || "").toLowerCase();
         const label = String(moduleItem?.label || key || "Modulo");
@@ -62,16 +160,7 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
         reply_markup: { inline_keyboard: buttons },
       });
 
-      if (!menu?.ok) {
-        log("Bot /start menu warning", {
-          telegramId: String(telegramId || ""),
-          status: menu?.status ?? 0,
-          error: menu?.error || "Sin detalle",
-          errorBody: menu?.data ?? null,
-        });
-      }
-
-      if (menu?.ok && buttons.length === 0) {
+      if (buttons.length === 0) {
         await bot.sendMessage(chatId, "No tenés módulos habilitados.");
       }
     } catch (error) {

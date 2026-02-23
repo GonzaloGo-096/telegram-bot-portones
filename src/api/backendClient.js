@@ -157,6 +157,47 @@ export function createBackendClient(baseUrl, options = {}) {
         data: {
           user: source.user ?? null,
           modules,
+          requiresAccountSelection: source.requiresAccountSelection === true,
+        },
+      };
+    },
+
+    /**
+     * Lista grupos de portones visibles para el usuario.
+     * GET /api/telegram/bot/modulos/portones/grupos?telegramId=...
+     */
+    async getPortonGroups(telegramId) {
+      const encoded = encodeURIComponent(String(telegramId));
+      const result = await request(
+        "GET",
+        `/api/telegram/bot/modulos/portones/grupos?telegramId=${encoded}`,
+        undefined,
+        { ...(botSecret ? { "x-bot-secret": botSecret } : {}) }
+      );
+      if (!result.ok) return result;
+      const groups = Array.isArray(result.data?.groups) ? result.data.groups : [];
+      return { ok: true, status: result.status, data: { groups } };
+    },
+
+    /**
+     * Lista gates de un grupo visible para el usuario.
+     * GET /api/telegram/bot/modulos/portones/grupos/:grupoId/portones?telegramId=...
+     */
+    async getGatesByGroup(telegramId, grupoId) {
+      const encoded = encodeURIComponent(String(telegramId));
+      const result = await request(
+        "GET",
+        `/api/telegram/bot/modulos/portones/grupos/${grupoId}/portones?telegramId=${encoded}`,
+        undefined,
+        { ...(botSecret ? { "x-bot-secret": botSecret } : {}) }
+      );
+      if (!result.ok) return result;
+      return {
+        ok: true,
+        status: result.status,
+        data: {
+          group: result.data?.group ?? null,
+          gates: Array.isArray(result.data?.gates) ? result.data.gates : [],
         },
       };
     },
