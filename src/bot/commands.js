@@ -1,10 +1,14 @@
 /**
  * Bot modo pantalla única: edita el mismo mensaje en cada paso.
  * /start crea el mensaje raíz; callbacks editan ese mensaje con editMessageText.
+ * Sistema visual: breadcrumbs, separador, 1 botón por fila, íconos por nivel.
  */
 
 /** rootMessageId por chatId (memoria) */
 const rootByChatId = new Map();
+
+/** Separador visual consistente */
+const SEP = "━━━━━━━━━━━━━━";
 
 /**
  * Mensaje de error según status HTTP.
@@ -65,85 +69,108 @@ async function upsertScreen({ bot, chatId, messageId, text, replyMarkup, log = (
 }
 
 /**
- * Botón estándar de Inicio.
+ * Una fila con el botón Inicio (1 botón por fila).
  */
 function btnInicio() {
   return [{ text: "🏠 Inicio", callback_data: "NAV:HOME" }];
 }
 
 /**
- * Botón estándar Atrás.
- * @param {string} backData - callback_data para ir atrás (ej. "NAV:BACK:GROUPS")
+ * Una fila con el botón Atrás (1 botón por fila).
  */
 function btnAtras(backData) {
   return [{ text: "⬅️ Atrás", callback_data: backData }];
 }
 
 /**
- * Ensambla filas de botones con navegación opcional.
+ * Ensambla filas con navegación. Un botón por fila.
+ * @param {Array<Array>} rows - cada fila es [botón]
+ * @param {boolean} showInicio
+ * @param {string|null} backData - ej. "NAV:BACK:GROUPS"
  */
 function withNav(rows, showInicio = true, backData = null) {
   const out = [...rows];
-  const navRow = [];
-  if (backData) navRow.push(...btnAtras(backData));
-  if (showInicio) navRow.push(...btnInicio());
-  if (navRow.length > 0) out.push(navRow);
+  if (backData) out.push(btnAtras(backData));
+  if (showInicio) out.push(btnInicio());
   return out;
 }
 
 /**
  * Render home (módulos).
+ * @param {Array} modules - [{ key, label }]
+ * @param {string} [userName]
+ * @param {string} [accountName]
  */
-function renderHome(modules, userName = "Usuario") {
+function renderHome(modules, userName = "Usuario", accountName = "") {
   const name = (userName || "Usuario").trim();
-  const text = `Hola, ${name} 👋\nBienvenido a GGO Automatizaciones\nElegí un módulo:`;
-  const buttons = (modules || []).map((m) => {
-    const key = String(m?.key || "").toLowerCase();
-    const label = String(m?.label || key || "Módulo");
-    const emoji = key === "portones" ? "🚪" : key === "cultivos" ? "🌱" : "📦";
-    return [{ text: `${emoji} ${label}`, callback_data: `mod:${key}` }];
-  });
-  return { text, replyMarkup: { inline_keyboard: buttons } };
+  const account = (accountName || "—").trim();
+  const text =
+    `👋 *Hola, ${name}*\n\n` +
+    `Bienvenido a *GGO Automatizaciones*\n\n` +
+    `${SEP}\n` +
+    `🏢 *Cuenta activa:*\n${account}\n\n` +
+    `Seleccioná un módulo:`;
+
+  const rows = (modules || [])
+    .filter((m) => m?.key && m?.enabled !== false)
+    .map((m) => {
+      const key = String(m.key).toLowerCase();
+      const label = String(m.label || key).trim();
+      const emoji = key === "portones" ? "🚪" : key === "cultivos" ? "🌱" : "📦";
+      return [{ text: `${emoji} ${label}`, callback_data: `mod:${key}` }];
+    });
+  rows.push([{ text: "ℹ️ Ayuda", callback_data: "mod:ayuda" }]);
+  return { text, replyMarkup: { inline_keyboard: rows } };
 }
 
 /**
  * Render lista de grupos.
+ * Breadcrumb: 🏠 Inicio › 🚪 Portones
  */
 function renderGroups(groups) {
-  const text = "Elegí un grupo de portones:";
+  const header = "🏠 Inicio › 🚪 Portones\n\n" + SEP + "\n\nSeleccioná un grupo:";
   const rows = (groups || []).map((g) => [
-    { text: `🚪 ${g.name || "Grupo " + g.id}`, callback_data: `PORTONES:GROUP:${g.id}` },
+    { text: `🗂 ${g.name || "Grupo " + g.id}`, callback_data: `PORTONES:GROUP:${g.id}` },
   ]);
-  return { text, replyMarkup: { inline_keyboard: withNav(rows, true, "NAV:HOME") } };
+  return { text: header, replyMarkup: { inline_keyboard: withNav(rows, true, "NAV:HOME") } };
 }
 
 /**
  * Render lista de gates.
+ * Breadcrumb: 🏠 Inicio › 🚪 Portones › 🗂 {groupName}
  */
 function renderGates(groupName, gates, grupoId) {
-  const text = `Portones en "${groupName || "Grupo"}":`;
+  const groupLabel = groupName || "Grupo";
+  const header = `🏠 Inicio › 🚪 Portones › 🗂 ${groupLabel}\n\n${SEP}\n\nSeleccioná un portón:`;
   const rows = (gates || []).map((g) => [
     {
-      text: `${g.name || "Portón " + g.id} (id: ${g.id})`,
+      text: `🔐 ${g.name || "Portón " + g.id}`,
       callback_data: `PORTONES:GATE:${g.id}:GROUP:${grupoId}`,
     },
   ]);
-  return { text, replyMarkup: { inline_keyboard: withNav(rows, true, "NAV:BACK:GROUPS") } };
+  return { text: header, replyMarkup: { inline_keyboard: withNav(rows, true, "NAV:BACK:GROUPS") } };
 }
 
 /**
  * Render detalle de un gate.
+ * Breadcrumb: 🏠 Inicio › 🚪 Portones › 🗂 {groupName}
  * @param {string} gateId
  * @param {string} gateName
- * @param {string} [grupoId] - para el botón Atrás (volver a gates del grupo)
+ * @param {string} [groupName] - para breadcrumb
+ * @param {string} [grupoId] - para botón Atrás
  */
-function renderGateDetail(gateId, gateName = "Portón", grupoId = null) {
-  const text =
-    `🚪 ${gateName}\n\n` +
-    `Para abrir este portón usá: \`/abrir ${gateId}\` (modo avanzado).\n\n` +
-    `(Apertura automática próximamente)`;
+function renderGateDetail(gateId, gateName = "Portón", groupName = "", grupoId = null) {
+  const groupLabel = groupName || "Grupo";
+  const header = `🏠 Inicio › 🚪 Portones › 🗂 ${groupLabel}\n\n${SEP}\n\n`;
+  const body =
+    `🔐 *${gateName}*\n` +
+    `ID: ${gateId}\n\n` +
+    `Acciones disponibles:\n\n` +
+    `Modo avanzado: \`/abrir ${gateId}\``;
+  const text = header + body;
   const backData = grupoId ? `NAV:BACK:GATES:${grupoId}` : "NAV:BACK:GROUPS";
-  return { text, replyMarkup: { inline_keyboard: withNav([], true, backData) } };
+  const rows = [[{ text: "🔓 Abrir (próximamente)", callback_data: `GATE:OPEN:${gateId}:GROUP:${grupoId || ""}` }]];
+  return { text, replyMarkup: { inline_keyboard: withNav(rows, true, backData) } };
 }
 
 /**
@@ -152,6 +179,18 @@ function renderGateDetail(gateId, gateName = "Portón", grupoId = null) {
 function renderCultivosComingSoon() {
   const text = "Módulo Cultivos activo. Próximamente acciones disponibles.";
   return { text, replyMarkup: { inline_keyboard: withNav([], true, "NAV:HOME") } };
+}
+
+/**
+ * Render Ayuda.
+ */
+function renderAyuda() {
+  const text =
+    `ℹ️ *Ayuda*\n\n` +
+    `• Usá los botones para navegar.\n` +
+    `• Si no ves tus portones, consultá al administrador.\n` +
+    `• Modo avanzado: \`/abrir {id}\``;
+  return { text, replyMarkup: { inline_keyboard: [btnInicio()] } };
 }
 
 /**
@@ -164,13 +203,22 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
     const messageId = query?.message?.message_id;
     const telegramId = query?.from?.id;
 
+    if (!chatId) return;
+
+    if (query.data?.startsWith("GATE:OPEN:")) {
+      try {
+        await bot.answerCallbackQuery(query.id, { text: "Próximamente" });
+      } catch (e) {
+        log("answerCallbackQuery error", { queryId: query?.id });
+      }
+      return;
+    }
+
     try {
       await bot.answerCallbackQuery(query.id);
     } catch (e) {
       log("answerCallbackQuery error", { queryId: query?.id });
     }
-
-    if (!chatId) return;
 
     const ctx = { bot, chatId, messageId, telegramId };
 
@@ -186,7 +234,8 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
         }
         const modules = menu?.data?.modules ?? [];
         const userName = menu?.data?.user?.fullName ?? null;
-        const { text, replyMarkup } = renderHome(modules, userName);
+        const accountName = menu?.data?.user?.accountName ?? "";
+        const { text, replyMarkup } = renderHome(modules, userName, accountName);
         await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
         return;
       }
@@ -206,7 +255,11 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
         }
         const groups = result.data?.groups ?? [];
         if (groups.length === 0) {
-          const { text, replyMarkup } = renderHome([], null);
+          const menu = await backendClient.getBotMenu(telegramId);
+          const modules = menu?.data?.modules ?? [];
+          const userName = menu?.data?.user?.fullName ?? null;
+          const accountName = menu?.data?.user?.accountName ?? "";
+          const { text, replyMarkup } = renderHome(modules, userName, accountName);
           await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
           return;
         }
@@ -252,13 +305,12 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
         }
         const groups = result.data?.groups ?? [];
         if (groups.length === 0) {
-          await upsertScreen({
-            ...ctx,
-            messageId,
-            text: "No tenés grupos de portones asignados.",
-            replyMarkup: { inline_keyboard: [btnInicio()] },
-            log,
-          });
+          const menu = await backendClient.getBotMenu(telegramId);
+          const modules = menu?.data?.modules ?? [];
+          const userName = menu?.data?.user?.fullName ?? null;
+          const accountName = menu?.data?.user?.accountName ?? "";
+          const { text, replyMarkup } = renderHome(modules, userName, accountName);
+          await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
           return;
         }
         const { text, replyMarkup } = renderGroups(groups);
@@ -302,8 +354,23 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
         const match = data.match(/^PORTONES:GATE:(\d+):GROUP:(\d+)$/);
         const gateId = match?.[1];
         const grupoId = match?.[2];
-        const gateName = "Portón " + (gateId || "");
-        const { text, replyMarkup } = renderGateDetail(gateId, gateName, grupoId);
+        let gateName = "Portón " + (gateId || "");
+        let groupName = "Grupo";
+        if (grupoId && telegramId) {
+          const res = await backendClient.getGatesByGroup(telegramId, grupoId);
+          if (res?.ok) {
+            groupName = res.data?.group?.name || groupName;
+            const g = (res.data?.gates ?? []).find((x) => String(x.id) === String(gateId));
+            if (g?.name) gateName = g.name;
+          }
+        }
+        const { text, replyMarkup } = renderGateDetail(gateId, gateName, groupName, grupoId);
+        await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
+        return;
+      }
+
+      if (data === "mod:ayuda") {
+        const { text, replyMarkup } = renderAyuda();
         await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
         return;
       }
@@ -315,7 +382,11 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
       }
 
       if (data.startsWith("mod:")) {
-        const { text, replyMarkup } = renderHome([{ key: "otro", label: "Otro" }]);
+        const menu = telegramId ? await backendClient.getBotMenu(telegramId) : null;
+        const modules = menu?.data?.modules ?? [];
+        const userName = menu?.data?.user?.fullName ?? null;
+        const accountName = menu?.data?.user?.accountName ?? "";
+        const { text, replyMarkup } = renderHome(modules, userName, accountName);
         await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
       }
     } catch (error) {
@@ -364,7 +435,8 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
 
       const modules = Array.isArray(menu?.data?.modules) ? menu.data.modules : [];
       const userName = menu?.data?.user?.fullName ?? null;
-      const { text, replyMarkup } = renderHome(modules, userName);
+      const accountName = menu?.data?.user?.accountName ?? "";
+      const { text, replyMarkup } = renderHome(modules, userName, accountName);
 
       if (modules.length === 0) {
         await upsertScreen({
@@ -395,10 +467,17 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
   bot.onText(/^\/help(?:@\w+)?$/i, async (msg) => {
     const chatId = msg?.chat?.id;
     if (!chatId) return;
-    await bot.sendMessage(
+    const rootId = rootByChatId.get(String(chatId));
+    const { text, replyMarkup } = renderAyuda();
+    const msgId = await upsertScreen({
+      bot,
       chatId,
-      "Comandos disponibles:\n• /start - Menú principal\n• /abrir {id_porton} - Abrir portón por ID (modo avanzado)"
-    );
+      messageId: rootId || null,
+      text,
+      replyMarkup,
+      log,
+    });
+    if (!rootId) rootByChatId.set(String(chatId), msgId);
   });
 
   bot.onText(/^\/abrir(?:@\w+)?\s+(\d+)$/i, async (msg, match) => {
