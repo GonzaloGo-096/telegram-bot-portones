@@ -180,6 +180,46 @@ export function createBackendClient(baseUrl, options = {}) {
     },
 
     /**
+     * Lista cultivos visibles para el usuario.
+     * GET /api/telegram/bot/modulos/cultivos?telegramId=...
+     */
+    async getCultivos(telegramId) {
+      const encoded = encodeURIComponent(String(telegramId));
+      const result = await request(
+        "GET",
+        `/api/telegram/bot/modulos/cultivos?telegramId=${encoded}`,
+        undefined,
+        { ...(botSecret ? { "x-bot-secret": botSecret } : {}) }
+      );
+      if (!result.ok) return result;
+      const cultivos = Array.isArray(result.data?.cultivos) ? result.data.cultivos : [];
+      return { ok: true, status: result.status, data: { cultivos } };
+    },
+
+    /**
+     * Lista macetas de un cultivo visible para el usuario.
+     * GET /api/telegram/bot/modulos/cultivos/:cultivoId/macetas?telegramId=...
+     */
+    async getMacetasByCultivo(telegramId, cultivoId) {
+      const encodedTg = encodeURIComponent(String(telegramId));
+      const result = await request(
+        "GET",
+        `/api/telegram/bot/modulos/cultivos/${encodeURIComponent(String(cultivoId))}/macetas?telegramId=${encodedTg}`,
+        undefined,
+        { ...(botSecret ? { "x-bot-secret": botSecret } : {}) }
+      );
+      if (!result.ok) return result;
+      return {
+        ok: true,
+        status: result.status,
+        data: {
+          cultivo: result.data?.cultivo ?? null,
+          macetas: Array.isArray(result.data?.macetas) ? result.data.macetas : [],
+        },
+      };
+    },
+
+    /**
      * Lista gates de un grupo visible para el usuario.
      * GET /api/telegram/bot/modulos/portones/grupos/:grupoId/portones?telegramId=...
      */

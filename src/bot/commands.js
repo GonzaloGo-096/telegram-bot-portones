@@ -17,6 +17,8 @@ function errorMessageForStatus(status) {
   switch (status) {
     case 401:
       return "⚠️ Error de autenticación interna del bot";
+    case 403:
+      return "⚠️ No tenés permiso para este módulo.";
     case 404:
       return "⚠️ No encontrado. Verificá que estés registrado.";
     case 503:
@@ -174,11 +176,42 @@ function renderGateDetail(gateId, gateName = "Portón", groupName = "", grupoId 
 }
 
 /**
- * Render Cultivos coming soon.
+ * Render lista de cultivos.
+ * Breadcrumb: 🏠 Inicio › 🌱 Cultivos
  */
-function renderCultivosComingSoon() {
-  const text = "Módulo Cultivos activo. Próximamente acciones disponibles.";
-  return { text, replyMarkup: { inline_keyboard: withNav([], true, "NAV:HOME") } };
+function renderCultivos(cultivos) {
+  const header = "🏠 Inicio › 🌱 Cultivos\n\n" + SEP + "\n\nSeleccioná un cultivo:";
+  const rows = (cultivos || []).map((c) => [
+    { text: `🌱 ${c.nombre || "Cultivo " + c.id}`, callback_data: `cultivo_${c.id}` },
+  ]);
+  return { text: header, replyMarkup: { inline_keyboard: withNav(rows, true, "NAV:HOME") } };
+}
+
+/**
+ * Agrupa un array en chunks de tamaño n.
+ */
+function chunk(arr, n) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) {
+    out.push(arr.slice(i, i + n));
+  }
+  return out;
+}
+
+/**
+ * Render lista de macetas. Máximo 2 botones por fila.
+ * Breadcrumb: 🏠 Inicio › 🌱 Cultivos › {cultivoName}
+ */
+function renderMacetas(cultivoName, macetas, cultivoId) {
+  const label = cultivoName || "Cultivo";
+  const header = `🏠 Inicio › 🌱 Cultivos › ${label}\n\n` + SEP + "\n\nSeleccioná una maceta:";
+  const buttons = (macetas || []).map((m) => ({
+    text: m.nombre || "Maceta",
+    callback_data: `maceta_${m.id}`,
+  }));
+  const rows = chunk(buttons, 2);
+  const backData = "NAV:BACK:CULTIVOS";
+  return { text: header, replyMarkup: { inline_keyboard: withNav(rows, true, backData) } };
 }
 
 /**
@@ -375,8 +408,93 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
         return;
       }
 
+      if (data === "NAV:BACK:CULTIVOS") {
+        if (!telegramId) return;
+        const result = await backendClient.getCultivos(telegramId);
+        if (!result.ok) {
+          await upsertScreen({
+            ...ctx,
+            messageId,
+            text: errorMessageForStatus(result.status ?? 0),
+            replyMarkup: null,
+            log,
+          });
+          return;
+        }
+        const cultivos = result.data?.cultivos ?? [];
+        if (cultivos.length === 0) {
+          const menu = await backendClient.getBotMenu(telegramId);
+          const modules = menu?.data?.modules ?? [];
+          const userName = menu?.data?.user?.fullName ?? null;
+          const accountName = menu?.data?.user?.accountName ?? "";
+          const { text, replyMarkup } = renderHome(modules, userName, accountName);
+          await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
+          return;
+        }
+        const { text, replyMarkup } = renderCultivos(cultivos);
+        await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
+        return;
+      }
+
       if (data === "mod:cultivos") {
-        const { text, replyMarkup } = renderCultivosComingSoon();
+        if (!telegramId) return;
+        const result = await backendClient.getCultivos(telegramId);
+        if (!result.ok) {
+          log("Bot mod:cultivos getCultivos error", { status: result.status });
+          await upsertScreen({
+            ...ctx,
+            messageId,
+            text: errorMessageForStatus(result.status ?? 0),
+            replyMarkup: null,
+            log,
+          });
+          return;
+        }
+        const cultivos = result.data?.cultivos ?? [];
+        if (cultivos.length === 0) {
+          await upsertScreen({
+            ...ctx,
+            messageId,
+            text: "No hay cultivos configurados.",
+            replyMarkup: { inline_keyboard: withNav([], true, "NAV:HOME") },
+            log,
+          });
+          return;
+        }
+        const { text, replyMarkup } = renderCultivos(cultivos);
+        await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
+        return;
+      }
+
+      if (data.startsWith("cultivo_")) {
+        const cultivoId = data.replace("cultivo_", "").trim();
+        if (!telegramId || !cultivoId) return;
+        const result = await backendClient.getMacetasByCultivo(telegramId, cultivoId);
+        if (!result.ok) {
+          log("Bot getMacetasByCultivo error", { cultivoId, status: result.status });
+          await upsertScreen({
+            ...ctx,
+            messageId,
+            text: errorMessageForStatus(result.status ?? 0),
+            replyMarkup: { inline_keyboard: withNav([], true, "NAV:BACK:CULTIVOS") },
+            log,
+          });
+          return;
+        }
+        const macetas = result.data?.macetas ?? [];
+        const cultivo = result.data?.cultivo ?? null;
+        const cultivoName = cultivo?.nombre || "Cultivo";
+        if (macetas.length === 0) {
+          await upsertScreen({
+            ...ctx,
+            messageId,
+            text: "Este cultivo no tiene macetas configuradas.",
+            replyMarkup: { inline_keyboard: withNav([], true, "NAV:BACK:CULTIVOS") },
+            log,
+          });
+          return;
+        }
+        const { text, replyMarkup } = renderMacetas(cultivoName, macetas, cultivoId);
         await upsertScreen({ ...ctx, messageId, text, replyMarkup, log });
         return;
       }
