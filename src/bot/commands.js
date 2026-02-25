@@ -164,11 +164,7 @@ function renderGates(groupName, gates, grupoId) {
 function renderGateDetail(gateId, gateName = "Portón", groupName = "", grupoId = null) {
   const groupLabel = groupName || "Grupo";
   const header = `🏠 Inicio › 🚪 Portones › 🗂 ${groupLabel}\n\n${SEP}\n\n`;
-  const body =
-    `🔐 *${gateName}*\n` +
-    `ID: ${gateId}\n\n` +
-    `Acciones disponibles:\n\n` +
-    `Modo avanzado: \`/abrir ${gateId}\``;
+  const body = `🔐 *${gateName}*\n\nTocá el botón para abrir:`;
   const text = header + body;
   const backData = grupoId ? `NAV:BACK:GATES:${grupoId}` : "NAV:BACK:GROUPS";
   const rows = [[{ text: "🔓 Abrir", callback_data: `GATE:OPEN:${gateId}:GROUP:${grupoId || ""}` }]];
@@ -221,8 +217,7 @@ function renderAyuda() {
   const text =
     `ℹ️ *Ayuda*\n\n` +
     `• Usá los botones para navegar.\n` +
-    `• Si no ves tus portones, consultá al administrador.\n` +
-    `• Modo avanzado: \`/abrir {id}\``;
+    `• Si no ves tus portones, consultá al administrador.`;
   return { text, replyMarkup: { inline_keyboard: [btnInicio()] } };
 }
 
