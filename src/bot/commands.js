@@ -171,7 +171,7 @@ function renderGateDetail(gateId, gateName = "Portón", groupName = "", grupoId 
     `Modo avanzado: \`/abrir ${gateId}\``;
   const text = header + body;
   const backData = grupoId ? `NAV:BACK:GATES:${grupoId}` : "NAV:BACK:GROUPS";
-  const rows = [[{ text: "🔓 Abrir (próximamente)", callback_data: `GATE:OPEN:${gateId}:GROUP:${grupoId || ""}` }]];
+  const rows = [[{ text: "🔓 Abrir", callback_data: `GATE:OPEN:${gateId}:GROUP:${grupoId || ""}` }]];
   return { text, replyMarkup: { inline_keyboard: withNav(rows, true, backData) } };
 }
 
@@ -239,10 +239,28 @@ export function registerCommands(bot, { backendClient, log = () => {} } = {}) {
     if (!chatId) return;
 
     if (query.data?.startsWith("GATE:OPEN:")) {
-      try {
-        await bot.answerCallbackQuery(query.id, { text: "Próximamente" });
-      } catch (e) {
-        log("answerCallbackQuery error", { queryId: query?.id });
+      const match = query.data.match(/^GATE:OPEN:(\d+):GROUP:(\d*)$/);
+      const gateId = match?.[1];
+      const grupoId = match?.[2] || "";
+      if (gateId && telegramId) {
+        const result = await backendClient.openGate(gateId, telegramId);
+        try {
+          if (result.ok) {
+            await bot.answerCallbackQuery(query.id, { text: "✅ Comando enviado" });
+          } else if (result.status === 401) {
+            await bot.answerCallbackQuery(query.id, { text: "⚠️ Error de autenticación", show_alert: true });
+          } else if (result.status === 403) {
+            await bot.answerCallbackQuery(query.id, { text: "⚠️ Sin permiso", show_alert: true });
+          } else if (result.status === 404) {
+            await bot.answerCallbackQuery(query.id, { text: "⚠️ No encontrado", show_alert: true });
+          } else if (result.status === 429) {
+            await bot.answerCallbackQuery(query.id, { text: "⏱ Esperá 2 segundos" });
+          } else {
+            await bot.answerCallbackQuery(query.id, { text: "⚠️ Error", show_alert: true });
+          }
+        } catch (e) {
+          log("answerCallbackQuery error", { queryId: query?.id });
+        }
       }
       return;
     }
